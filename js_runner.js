@@ -32,11 +32,10 @@ function execute(params) {
 
     // ── java.* API 模拟 ──
     const java = {
-        // HTTP 请求
+        // HTTP 请求（同步，用 curl）
         ajax(urlOrOpts) {
             let url, opts = {};
             if (typeof urlOrOpts === 'string') {
-                // 解析 "url,{headers:{...}}" 格式
                 const idx = urlOrOpts.indexOf(',{');
                 if (idx > 0) {
                     url = urlOrOpts.substring(0, idx);
@@ -48,23 +47,37 @@ function execute(params) {
                 url = urlOrOpts.url || '';
                 opts = urlOrOpts;
             }
+            if (!url) return '';
 
-            // 同步 HTTP 请求（使用 child_process.execSync）
             const { execSync } = require('child_process');
             const method = (opts.method || 'GET').toUpperCase();
             const headers = { ...reqHeaders, ...(opts.headers || {}) };
 
-            let curlCmd = `curl -s -L --max-time 10 -X ${method}`;
+            let curlCmd = `curl -s -L --max-time 15 -X ${method}`;
             for (const [k, v] of Object.entries(headers)) {
-                curlCmd += ` -H "${k}: ${v}"`;
+                // 转义 header 值中的特殊字符
+                const escaped = String(v).replace(/"/g, '\\"');
+                curlCmd += ` -H "${k}: ${escaped}"`;
             }
+            // body：支持对象和字符串
             if (opts.body) {
-                curlCmd += ` -d '${opts.body.replace(/'/g, "\\'")}'`;
+                const bodyStr = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
+                // 用临时文件传 body，避免 shell 转义问题
+                const tmpFile = require('os').tmpdir() + '/legado_req_body_' + Date.now() + '.json';
+                require('fs').writeFileSync(tmpFile, bodyStr, 'utf8');
+                curlCmd += ` -d @${tmpFile}`;
+                try {
+                    const result = execSync(curlCmd + ` "${url}"`, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+                    require('fs').unlinkSync(tmpFile);
+                    return result;
+                } catch (e) {
+                    try { require('fs').unlinkSync(tmpFile); } catch(_){}
+                    return '';
+                }
             }
-            curlCmd += ` "${url}"`;
 
             try {
-                return execSync(curlCmd, { encoding: 'utf8', timeout: 120000, windowsHide: true });
+                return execSync(curlCmd + ` "${url}"`, { encoding: 'utf8', timeout: 15000, windowsHide: true });
             } catch (e) {
                 return '';
             }

@@ -287,29 +287,31 @@ def walk_path(data, path):
 def extract_val(ctx, sel, default='', base_url=''):
     if not sel:
         return default
-    # dict 上下文 + 复杂规则：包含 <js>、@js: 或 {{...}} 模板
+    # dict 上下文 + 复杂规则
     if isinstance(ctx, dict):
         if '<js>' in sel or '@js:' in sel or '{{' in sel:
             val = _resolve_rule(sel, ctx, base_url)
             return val if val else default
-    clean = re.sub(r'##[^#]*(?:##[^#]*)*$', '', sel)
-    clean = re.sub(r'@get:\{[^}]*\}', '', clean).strip()
-    if not clean:
+        # || 回退 + ## 后处理
+        parts = sel.split('||')
+        for part in parts:
+            p = re.sub(r'@get:\{[^}]*\}', '', part).strip()
+            if not p:
+                continue
+            base_p, hash_rules = _parse_hash_rules(p)
+            base_p = base_p.strip()
+            if not base_p:
+                continue
+            key = base_p[2:] if base_p.startswith('$.') else base_p
+            val = walk_path(ctx, key) if '.' in key else ctx.get(key)
+            if val is not None:
+                return _apply_hash_rules(str(val).strip(), hash_rules)
         return default
-    if isinstance(ctx, dict):
-        # 去掉 $. 前缀
-        key = clean[2:] if clean.startswith('$.') else clean
-        # 处理嵌套路径如 $.categoryNames.className
-        val = walk_path(ctx, key) if '.' in key else ctx.get(key)
-        if val is not None:
-            return str(val).strip()
+    # BeautifulSoup 上下文：|| 回退 + ## 后处理
     if isinstance(ctx, BeautifulSoup):
-        sel_fixed = re.sub(r'^@css:', '', clean)
-        sel_fixed = re.sub(r'@text$|@src$|@href$|@html$', '', sel_fixed)
-        sel_fixed = css_conv(sel_fixed)
-        el = ctx.select_one(sel_fixed)
-        if el:
-            return el.get_text(strip=True)
+        parts = sel.split('||')
+        val = _try_css_select(ctx, parts, base_url, 'text')
+        return val if val else default
     return default
 
 def extract_img(ctx, sel, base_url=''):
@@ -320,20 +322,26 @@ def extract_img(ctx, sel, base_url=''):
         if val:
             return urljoin(base_url, val) if not val.startswith('http') else val
         return ''
-    clean = re.sub(r'##[^#]*(?:##[^#]*)*$', '', sel).strip()
     if isinstance(ctx, dict):
-        key = clean[2:] if clean.startswith('$.') else clean
-        val = walk_path(ctx, key) if '.' in key else ctx.get(key)
-        if val:
-            return urljoin(base_url, str(val)) if not str(val).startswith('http') else str(val)
+        parts = sel.split('||')
+        for part in parts:
+            p = part.strip()
+            if not p:
+                continue
+            base_p, hash_rules = _parse_hash_rules(p)
+            base_p = base_p.strip()
+            if not base_p:
+                continue
+            key = base_p[2:] if base_p.startswith('$.') else base_p
+            val = walk_path(ctx, key) if '.' in key else ctx.get(key)
+            if val:
+                result = _apply_hash_rules(str(val), hash_rules)
+                return urljoin(base_url, result) if not result.startswith('http') else result
+        return ''
     if isinstance(ctx, BeautifulSoup):
-        sel_fixed = re.sub(r'^@css:', '', clean)
-        sel_fixed = re.sub(r'@src$|@href$|@html$', '', sel_fixed)
-        sel_fixed = css_conv(sel_fixed)
-        el = ctx.select_one(sel_fixed)
-        if el:
-            src = el.get('data-src') or el.get('src') or el.get('data-original') or ''
-            return urljoin(base_url, src) if src else ''
+        parts = sel.split('||')
+        src = _try_css_select(ctx, parts, base_url, 'src')
+        return urljoin(base_url, src) if src else ''
     return ''
 
 def extract_link(ctx, sel, base_url=''):
@@ -344,24 +352,91 @@ def extract_link(ctx, sel, base_url=''):
         if val:
             return urljoin(base_url, val) if not val.startswith('http') else val
         return ''
-    clean = re.sub(r'##[^#]*(?:##[^#]*)*$', '', sel).strip()
     if isinstance(ctx, dict):
-        key = clean[2:] if clean.startswith('$.') else clean
-        val = walk_path(ctx, key) if '.' in key else ctx.get(key)
-        if val:
-            return str(val)
-        val = ctx.get(clean)
-        if val:
-            return str(val)
+        parts = sel.split('||')
+        for part in parts:
+            p = part.strip()
+            if not p:
+                continue
+            base_p, hash_rules = _parse_hash_rules(p)
+            base_p = base_p.strip()
+            if not base_p:
+                continue
+            key = base_p[2:] if base_p.startswith('$.') else base_p
+            val = walk_path(ctx, key) if '.' in key else ctx.get(key)
+            if val:
+                result = _apply_hash_rules(str(val), hash_rules)
+                return result if result.startswith('http') else urljoin(base_url, result)
+        return ''
     if isinstance(ctx, BeautifulSoup):
-        sel_fixed = re.sub(r'^@css:', '', clean)
-        sel_fixed = re.sub(r'@text$|@src$|@href$|@html$', '', sel_fixed)
-        sel_fixed = css_conv(sel_fixed)
-        el = ctx.select_one(sel_fixed)
-        if el:
-            href = el.get('href') or el.get('data-href') or ''
-            return urljoin(base_url, href) if href else ''
+        parts = sel.split('||')
+        href = _try_css_select(ctx, parts, base_url, 'href')
+        return urljoin(base_url, href) if href else ''
     return ''
+
+def _parse_hash_rules(sel):
+    """从选择器中提取 ##pattern##replacement 后处理规则
+    返回 (clean_sel, [(pattern, replacement), ...])
+    Legado 格式: selector##regex1##repl1##regex2##repl2
+    """
+    if not sel or '##' not in sel:
+        return sel, []
+    # 找到第一个 ## 的位置（选择器和后处理的分界）
+    idx = sel.index('##')
+    base = sel[:idx]
+    tail = sel[idx:]
+    rules = []
+    # 按 ## 分割，交替作为 pattern 和 replacement
+    parts = tail.split('##')[1:]  # 去掉开头的空串
+    for i in range(0, len(parts) - 1, 2):
+        rules.append((parts[i], parts[i + 1]))
+    return base, rules
+
+def _apply_hash_rules(value, rules):
+    """对提取到的值依次应用 ## 后处理规则"""
+    if not rules or not value:
+        return value
+    for pattern, replacement in rules:
+        try:
+            value = re.sub(pattern, replacement, value)
+        except re.error:
+            pass  # 不合法的正则跳过
+    return value
+
+def _try_css_select(soup, sel_parts, base_url='', extract='text'):
+    """对多段 CSS 选择器逐段尝试（支持 || 回退）
+    sel_parts: ['selector1', 'selector2', ...]
+    extract: 'text' | 'src' | 'href'
+    """
+    for part in sel_parts:
+        part = part.strip()
+        if not part:
+            continue
+        # 处理 ## 后处理规则
+        base_part, hash_rules = _parse_hash_rules(part)
+        base_part = base_part.strip()
+        if not base_part:
+            continue
+        # 转换选择器
+        sel_fixed = re.sub(r'^@css:', '', base_part)
+        sel_fixed = css_conv(sel_fixed)
+        if not sel_fixed:
+            continue
+        try:
+            el = soup.select_one(sel_fixed)
+            if el:
+                if extract == 'src':
+                    val = el.get('data-src') or el.get('src') or el.get('data-original') or ''
+                elif extract == 'href':
+                    val = el.get('href') or el.get('data-href') or ''
+                else:
+                    val = el.get_text(strip=True)
+                if val:
+                    return _apply_hash_rules(val, hash_rules)
+        except Exception:
+            continue
+    return ''
+
 
 def css_conv(sel):
     """Legado CSS 选择器 → 标准 CSS"""
@@ -524,10 +599,25 @@ class JsonApiSource:
         return results
 
     def detail(self, book_url, search_data=None):
-        # 混合型源：详情走 HTML/CSS 解析
+        # 标记为 CSS 详情 → 走 HTML 解析，失败则 JSON 兜底
         if self._is_css_detail():
-            return self._detail_css(book_url, search_data)
+            result = self._detail_css(book_url, search_data)
+            if result.get('chapters') or result.get('name'):
+                return result
+            # CSS 失败，走 JSON API 兜底
+            return self._detail_json(book_url, search_data)
 
+        # 纯 JSON API 路径
+        result = self._detail_json(book_url, search_data)
+        # JSON 失败则尝试 CSS 兜底
+        if (not result.get('chapters') and not result.get('name')) or self._is_css_detail():
+            css_result = self._detail_css(book_url, search_data)
+            if css_result.get('chapters'):
+                return css_result
+        return result
+
+    def _detail_json(self, book_url, search_data=None):
+        """纯 JSON API 详情解析"""
         init = self.bi_r.get('init', '').strip() if self.bi_r else ''
         if init and not init.startswith('@js'):
             full = _join_url(self.http_base, book_url)
@@ -565,32 +655,57 @@ class JsonApiSource:
         return book
 
     def _detail_css(self, book_url, search_data=None):
-        """CSS/HTML 混合型源的详情解析（类似 CssSource）"""
+        """CSS/HTML 混合型源的详情解析，CSS 失败时尝试 JSON 兜底"""
         url = _join_url(self.http_base, book_url)
+        book = {}
+        soup = None
         try:
             soup = self._fetch_html(url)
         except Exception:
-            return search_data or {}
+            pass
+
         bi = self.bi_r
-        book = {
-            'name': extract_val(soup, bi.get('name', '')) or (search_data.get('name', '') if search_data else ''),
-            'author': extract_val(soup, bi.get('author', '')) or (search_data.get('author', '') if search_data else ''),
-            'cover': extract_img(soup, bi.get('coverUrl', ''), self.http_base) or (search_data.get('cover', '') if search_data else ''),
-            'intro': extract_val(soup, bi.get('intro', '')) or (search_data.get('intro', '') if search_data else ''),
-            'kind': extract_val(soup, bi.get('kind', '')),
-            'last_chapter': extract_val(soup, bi.get('lastChapter', '')),
-        }
+        if soup:
+            book = {
+                'name': extract_val(soup, bi.get('name', '')) or (search_data.get('name', '') if search_data else ''),
+                'author': extract_val(soup, bi.get('author', '')) or (search_data.get('author', '') if search_data else ''),
+                'cover': extract_img(soup, bi.get('coverUrl', ''), self.http_base) or (search_data.get('cover', '') if search_data else ''),
+                'intro': extract_val(soup, bi.get('intro', '')) or (search_data.get('intro', '') if search_data else ''),
+                'kind': extract_val(soup, bi.get('kind', '')),
+                'last_chapter': extract_val(soup, bi.get('lastChapter', '')),
+            }
+
+        # 兜底：HTML 解析无结果时用搜索数据
+        if not book.get('name') and search_data:
+            book = {
+                'name': search_data.get('name', ''),
+                'author': search_data.get('author', ''),
+                'cover': search_data.get('cover', ''),
+                'intro': search_data.get('intro', ''),
+                'kind': '',
+                'last_chapter': '',
+            }
+
         toc_url = self.toc_r.get('tocUrl', '') or bi.get('tocUrl', '')
         if toc_url and '{{' in toc_url:
             toc_url = resolve_tpl(toc_url, {})
-        book['chapters'] = self._chapters(toc_url or book_url, soup)
+
+        # 优先 CSS 目录解析；失败时尝试 JSON API 目录
+        chapters = self._chapters(toc_url or book_url, soup)
+        if not chapters:
+            # JSON API 兜底
+            chapters = self._chapters_json(toc_url or book_url)
+        book['chapters'] = chapters
         return book
 
     def _chapters(self, toc_url, soup=None):
-        # 混合型源：使用 CSS 选择器解析 HTML
+        # 路由：有 soup 或标记为 CSS 详情 → CSS 选择器解析
         if soup is not None or self._is_css_detail():
             return self._chapters_css(toc_url, soup)
+        return self._chapters_json(toc_url)
 
+    def _chapters_json(self, toc_url):
+        """纯 JSON API 目录解析（可独立调用作为兜底）"""
         url = _join_url(self.http_base, toc_url) if toc_url else ''
         try:
             resp = http_requests.get(url, headers=self._req_headers(), timeout=15)
@@ -625,7 +740,6 @@ class JsonApiSource:
             if not isinstance(ch, dict):
                 continue
             name = extract_val(ch, cn, base_url=self.http_base) or f'第{i+1}章'
-            # 使用 _resolve_rule 统一处理 <js>、@js:、{{}} 模板
             curl = _resolve_rule(cu, ch, url)
             curl = _join_url(self.http_base, curl) if curl else ''
             result.append({'name': name, 'url': curl, 'index': i})
@@ -731,18 +845,34 @@ class CssSource:
         return BeautifulSoup(resp.text, 'lxml')
 
     def search(self, kw, page=1):
-        if self.search_url.startswith('http'):
-            url = build_url(self.search_url, kw, page)
+        # 处理 @js: 搜索 URL — 先执行 JS 得到真实 URL
+        su = self.search_url
+        if su.startswith('@js:') or su.startswith('@js'):
+            code = su[4:].strip() if su.startswith('@js:') else su[3:].strip()
+            if code:
+                result = run_legado_js(code, kw, self.http_base)
+                if result and (result.startswith('http') or result.startswith('/')):
+                    su = result
+                else:
+                    return []
+        if su.startswith('http'):
+            url = build_url(su, kw, page)
         else:
-            url = build_url(self.http_base + self.search_url, kw, page)
+            url = build_url(self.http_base + su, kw, page)
         try:
             soup = self._fetch(url)
         except Exception:
             return []
-        bl_sel = css_conv(self.sr.get('bookList', ''))
-        if not bl_sel:
-            return []
-        items = soup.select(bl_sel)
+        # || 回退：bookList 选择器也可能有多段
+        bl_raw = self.sr.get('bookList', '')
+        items = []
+        for bl_part in bl_raw.split('||'):
+            bl_sel = css_conv(bl_part.strip())
+            if not bl_sel:
+                continue
+            items = soup.select(bl_sel)
+            if items:
+                break
         results = []
         for item in items:
             name = extract_val(item, self.sr.get('name', ''))
@@ -849,6 +979,7 @@ def run_js(code, key='', page=1, source_url='', headers=None, store=None):
     params = json.dumps({
         'code': code, 'key': key, 'page': page,
         'sourceUrl': source_url,
+        'result': '',
         'headers': headers or {},
         'store': store or {},
     }, ensure_ascii=False)
@@ -920,9 +1051,9 @@ class JsSource:
             return []
         # 构造完整 URL
         if search_url.startswith('/'):
-            search_url = self.base + search_url
+            search_url = self.http_base + search_url
         elif not search_url.startswith('http'):
-            search_url = self.base + '/' + search_url
+            search_url = self.http_base + '/' + search_url
         # 分离 URL 和 headers
         extra_headers = {}
         if ',{' in search_url:
@@ -977,11 +1108,11 @@ class JsSource:
             name = extract_val(item, self.sr.get('name', ''))
             if not name:
                 continue
-            book_url = extract_val(item, self.sr.get('bookUrl', ''), base_url=self.base)
+            book_url = extract_val(item, self.sr.get('bookUrl', ''), base_url=self.http_base)
             results.append({
                 'name': name,
                 'author': extract_val(item, self.sr.get('author', '')),
-                'cover': extract_img(item, self.sr.get('coverUrl', ''), self.base),
+                'cover': extract_img(item, self.sr.get('coverUrl', ''), self.http_base),
                 'intro': extract_val(item, self.sr.get('intro', '')),
                 'kind': extract_val(item, self.sr.get('kind', '')),
                 'book_url': book_url,
@@ -1014,11 +1145,11 @@ class JsSource:
         book = {
             'name': extract_val(data, self.bi_r.get('name', '') or self.sr.get('name', ''), search_data.get('name', '') if search_data else ''),
             'author': extract_val(data, self.bi_r.get('author', '') or self.sr.get('author', ''), search_data.get('author', '') if search_data else ''),
-            'cover': extract_img(data, self.bi_r.get('coverUrl', '') or self.sr.get('coverUrl', ''), self.base) or (search_data.get('cover', '') if search_data else ''),
-            'intro': extract_val(data, self.bi_r.get('intro', '') or self.sr.get('intro', ''), search_data.get('intro', '') if search_data else ''),
-            'kind': extract_val(data, self.bi_r.get('kind', '') or self.sr.get('kind', '')),
-            'last_chapter': extract_val(data, self.bi_r.get('lastChapter', '') or self.sr.get('lastChapter', '')),
-            'word_count': extract_val(data, self.bi_r.get('wordCount', '') or self.sr.get('wordCount', '')),
+            'cover': extract_img(data, self.bi_r.get('coverUrl', '') or self.sr.get('coverUrl', ''), self.http_base) or (search_data.get('cover', '') if search_data else ''),
+            'intro': extract_val(data, self.bi_r.get('intro', '') or self.sr.get('intro', ''), search_data.get('intro', '') if search_data else '', base_url=self.http_base),
+            'kind': extract_val(data, self.bi_r.get('kind', '') or self.sr.get('kind', ''), base_url=self.http_base),
+            'last_chapter': extract_val(data, self.bi_r.get('lastChapter', '') or self.sr.get('lastChapter', ''), base_url=self.http_base),
+            'word_count': extract_val(data, self.bi_r.get('wordCount', '') or self.sr.get('wordCount', ''), base_url=self.http_base),
         }
         toc_url = self.toc_r.get('tocUrl', '') or self.bi_r.get('tocUrl', '')
         if toc_url:
@@ -1098,7 +1229,44 @@ class SourceManager:
     def __init__(self):
         self.sources = {}
         self.enabled = set()
+        self.health = {}  # url → {'ok': bool, 'latency': float, 'error': str}
         self._load()
+        # 后台异步健康检测（不阻塞启动）
+        import threading
+        t = threading.Thread(target=self._health_check, daemon=True)
+        t.start()
+
+    def _health_check(self):
+        """启动后异步 ping 各源，标记可用性"""
+        import time as _t
+        targets = [s for s in self.sources.values() if isinstance(s, (JsonApiSource, CssSource))]
+        print(f'🔍 开始健康检测 {len(targets)} 个源...')
+
+        def _ping(src):
+            try:
+                t0 = _t.time()
+                # 用搜索 API 做轻量探测（无关键词时可能返回空列表，但能测通断）
+                results = src.search('healthcheck_', page=1)
+                latency = _t.time() - t0
+                return (True, latency, '')
+            except Exception as e:
+                return (False, 0, str(e)[:80])
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        ok_count = 0
+        with ThreadPoolExecutor(max_workers=30) as pool:
+            futs = {pool.submit(_ping, s): s for s in targets}
+            for fut in as_completed(futs, timeout=20):
+                src = futs[fut]
+                url = src.base
+                try:
+                    ok, latency, err = fut.result()
+                    self.health[url] = {'ok': ok, 'latency': round(latency, 2), 'error': err}
+                    if ok:
+                        ok_count += 1
+                except Exception:
+                    self.health[url] = {'ok': False, 'latency': 0, 'error': 'timeout'}
+        print(f'🔍 健康检测完成: {ok_count}/{len(targets)} 个源可达')
 
     def _load(self):
         src_path = sys.argv[1] if len(sys.argv) > 1 else r'F:\86135\下载\墨辰整理书源大全7.1（禁止倒卖）【最新完整】.json'
@@ -1141,42 +1309,65 @@ class SourceManager:
             self.enabled.add(url)
         print(f'✓ 已加载 {len(self.sources)} 个源（JSON API: {json_count}, CSS: {css_count}, JS: {js_count}）')
 
-    def search(self, kw, page=1, source_filter=None, max_workers=20, max_sources=20, search_timeout=4):
+    def search(self, kw, page=1, source_filter=None, max_workers=30, max_sources=20, search_timeout=4):
         targets = [self.sources[u] for u in self.enabled if u in self.sources]
         if source_filter:
             targets = [s for s in targets if source_filter in s.name or source_filter in s.base]
-        # 优先 JSON API 源（最快），JS 源次之，CSS 选最少
-        json_targets = [s for s in targets if isinstance(s, JsonApiSource)]
-        js_targets = [s for s in targets if isinstance(s, JsSource)]
-        css_targets = [s for s in targets if isinstance(s, CssSource)]
-        targets = json_targets + js_targets + css_targets
-        targets = targets[:max_sources]
+
+        # ── 健康源优先 + 分层 ──
+        healthy = [s for s in targets if self.health.get(s.base, {}).get('ok')]
+        unhealthy = [s for s in targets if not self.health.get(s.base, {}).get('ok')]
+        json_h = [s for s in healthy if isinstance(s, JsonApiSource)]
+        js_h = [s for s in healthy if isinstance(s, JsSource)]
+        css_h = [s for s in healthy if isinstance(s, CssSource)]
+        json_u = [s for s in unhealthy if isinstance(s, JsonApiSource)]
+        js_u = [s for s in unhealthy if isinstance(s, JsSource)]
+        css_u = [s for s in unhealthy if isinstance(s, CssSource)]
+        tiered = json_h + js_h + css_h + json_u[:20] + js_u[:15] + css_u[:10]
+        tiered = tiered[:120]  # 硬上限 120 个源
+
         all_results = []
+        seen = set()  # 去重：书名+作者
+
+        def _dedup_key(r):
+            name = re.sub(r'[^\u4e00-\u9fff\w]', '', r.get('name', ''))
+            author = re.sub(r'[^\u4e00-\u9fff\w]', '', r.get('author', ''))
+            return f'{name}|{author}'.lower()
+
         def _do(src):
             try:
                 return src.search(kw, page)
             except Exception:
                 return []
+
         pool = ThreadPoolExecutor(max_workers=max_workers)
-        futs = [pool.submit(_do, s) for s in targets]
+        futs = [pool.submit(_do, s) for s in tiered]
         from concurrent.futures import as_completed
         import time as _time
-        deadline = _time.time() + search_timeout
+        deadline = _time.time() + search_timeout + 4  # 给 +4s 缓冲
+        early_deadline = _time.time() + 3  # 3秒内有 ≥10 条就提前返回
+
         try:
-            for fut in as_completed(futs, timeout=search_timeout + 2):
+            for fut in as_completed(futs, timeout=search_timeout + 6):
                 try:
                     results = fut.result()
-                    if results:
-                        all_results.extend(results)
+                    for r in results:
+                        key = _dedup_key(r)
+                        if key not in seen:
+                            seen.add(key)
+                            all_results.append(r)
                 except Exception:
                     pass
-                # 有足够结果或超时就返回
-                if _time.time() >= deadline or len(all_results) >= 15:
+                now = _time.time()
+                # 3s 内有 ≥10 条即返回；总超时或 ≥30 条也返回
+                if len(all_results) >= 30 or (now >= deadline):
+                    break
+                if len(all_results) >= 10 and now >= early_deadline:
                     break
         except TimeoutError:
             pass
         pool.shutdown(wait=False)
-        print(f'[search] results={len(all_results)}, targets={len(targets)}')
+        print(f'[search] results={len(all_results)}, deduped, sources_scanned={len(tiered)}')
         return all_results
 
     def get_source(self, source_url):
@@ -1208,12 +1399,15 @@ def index():
 def api_sources():
     sources = []
     for url, src in mgr.sources.items():
+        h = mgr.health.get(url, {})
         sources.append({
             'url': url,
             'name': src.name,
             'group': src.group,
             'enabled': url in mgr.enabled,
             'type': 'js' if isinstance(src, JsSource) else ('json' if isinstance(src, JsonApiSource) else 'css'),
+            'healthy': h.get('ok'),
+            'latency': h.get('latency', 0),
         })
     return jsonify(sources)
 

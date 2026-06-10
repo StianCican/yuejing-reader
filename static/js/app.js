@@ -206,16 +206,24 @@ function renderSources() {
     if (!groups[g]) groups[g] = [];
     groups[g].push(s);
   });
+  const healthyCount = sources.filter(s => s.healthy).length;
+  document.getElementById('sourceCount').innerHTML =
+    `${sources.filter(s => s.enabled).length}/${sources.length} 源已启用 ·
+     <span style="color:var(--green)">${healthyCount} 可用</span>`;
   let html = '';
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
-    html += list.map(s =>
-      `<div class="source-item" onclick="toggleSource('${esc(s.url)}')">
-        <span class="dot ${s.enabled?'on':'off'}"></span>
+    html += list.map(s => {
+      const healthDot = s.healthy === true ? '<span class="dot on"></span>' :
+                        s.healthy === false ? '<span class="dot off"></span>' :
+                        '<span class="dot unknown"></span>';
+      const latencyStr = s.latency ? ` ${s.latency}s` : '';
+      return `<div class="source-item" onclick="toggleSource('${esc(s.url)}')">
+        ${healthDot}
         <span class="name">${esc(s.name)}</span>
-        <span class="badge">${s.type}</span>
-      </div>`
-    ).join('');
+        <span class="badge">${s.type}${latencyStr}</span>
+      </div>`;
+    }).join('');
   }
   el.innerHTML = html;
 }
