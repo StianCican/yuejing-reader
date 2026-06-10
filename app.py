@@ -84,7 +84,7 @@ def run_legado_js(js_code, result_value='', source_url=''):
                 'headers': {},
                 'store': {},
             }),
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, encoding='utf-8', timeout=20,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
         )
         if proc.returncode == 0 and proc.stdout.strip():
