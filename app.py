@@ -1049,11 +1049,11 @@ class SourceManager:
             self.enabled.add(url)
         print(f'✓ 已加载 {len(self.sources)} 个源（JSON API: {json_count}, CSS: {css_count}, JS: {js_count}）')
 
-    def search(self, kw, page=1, source_filter=None, max_workers=20, max_sources=30, search_timeout=6):
+    def search(self, kw, page=1, source_filter=None, max_workers=20, max_sources=20, search_timeout=4):
         targets = [self.sources[u] for u in self.enabled if u in self.sources]
         if source_filter:
             targets = [s for s in targets if source_filter in s.name or source_filter in s.base]
-        # 优先 JSON API 源（最快）
+        # 优先 JSON API 源（最快），JS 源次之，CSS 选最少
         json_targets = [s for s in targets if isinstance(s, JsonApiSource)]
         js_targets = [s for s in targets if isinstance(s, JsSource)]
         css_targets = [s for s in targets if isinstance(s, CssSource)]
@@ -1078,7 +1078,8 @@ class SourceManager:
                         all_results.extend(results)
                 except Exception:
                     pass
-                if _time.time() >= deadline and all_results:
+                # 有足够结果或超时就返回
+                if _time.time() >= deadline or len(all_results) >= 15:
                     break
         except TimeoutError:
             pass
