@@ -50,16 +50,25 @@ function switchTab(tab) {
 async function doSearch() {
   const kw = document.getElementById('searchInput').value.trim();
   if (!kw) return;
-  showView('loading');
-  document.getElementById('loadingText').textContent = `正在搜索「${kw}」...`;
+  // 先切到搜索视图，显示骨架屏
+  showView('search');
+  document.getElementById('resultCount').textContent = '搜索中...';
+  document.getElementById('searchResults').innerHTML = Array(4).fill(0).map(() =>
+    `<div class="skeleton-card">
+      <div class="skeleton-cover"></div>
+      <div class="skeleton-lines">
+        <div class="skeleton-line w-60"></div>
+        <div class="skeleton-line w-40"></div>
+        <div class="skeleton-line w-80"></div>
+      </div>
+    </div>`
+  ).join('');
   try {
     const resp = await fetch(`/api/search?q=${encodeURIComponent(kw)}`);
     const results = await resp.json();
-    showView('search');
     document.getElementById('resultCount').textContent = `共 ${results.length} 条结果`;
     renderSearchResults(results);
   } catch (e) {
-    showView('search');
     document.getElementById('searchResults').innerHTML = '<div class="empty"><div class="icon">❌</div><p>搜索失败，请检查后端是否运行</p></div>';
   }
 }
