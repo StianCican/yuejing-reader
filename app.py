@@ -1240,44 +1240,46 @@ class SourceManager:
         """启动后异步 ping 各源，标记可达性（轻量 HEAD/GET，不解析内容）"""
         import time as _t
         targets = list(self.sources.values())
-        print(f'🔍 开始健康检测 {len(targets)} 个源...')
+        print(f'🔍 开始健康检测 {len(targets)} 个源（后台运行约30秒）...')
 
         def _ping(src):
-            """用 HTTP HEAD 探测源的可达性，极快"""
+            """用 HTTP HEAD/GET 探测源的可达性"""
             base = getattr(src, 'http_base', src.base)
             if not base.startswith('http'):
                 return (False, 0, '无HTTP地址')
-            try:
-                t0 = _t.time()
-                # HEAD 请求只拿头不拿体，10KB 以内，比搜索快 100 倍
-                resp = session.head(base, timeout=5, allow_redirects=True)
-                latency = _t.time() - t0
-                return (True, round(latency, 2), '')
-            except Exception as e:
-                # HEAD 失败尝试 GET（某些服务器不支持 HEAD）
+            for method_name, do_stream in [('HEAD', False), ('GET', True)]:
                 try:
                     t0 = _t.time()
-                    resp = session.get(base, timeout=5, stream=True)
-                    resp.close()  # 立刻关闭，只测连通性
-                    latency = _t.time() - t0
-                    return (True, round(latency, 2), '')
-                except Exception as e2:
-                    return (False, 0, str(e2)[:60])
+                    if method_name == 'HEAD':
+                        resp = session.head(base, timeout=3, allow_redirects=True)
+                    else:
+                        resp = session.get(base, timeout=3, stream=True)
+                        resp.close()
+                    return (True, round(_t.time() - t0, 2), '')
+                except Exception:
+                    continue
+            return (False, 0, '连接失败')
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        ok_count = 0
-        with ThreadPoolExecutor(max_workers=40) as pool:
+        ok_count, fail_count = 0, 0
+        with ThreadPoolExecutor(max_workers=50) as pool:
             futs = {pool.submit(_ping, s): s for s in targets}
-            for fut in as_completed(futs, timeout=25):
-                src = futs[fut]
-                key = src.base
-                try:
-                    ok, latency, err = fut.result()
-                    self.health[key] = {'ok': ok, 'latency': latency, 'error': err}
-                    if ok: ok_count += 1
-                except Exception:
-                    self.health[key] = {'ok': False, 'latency': 0, 'error': 'timeout'}
-        print(f'🔍 健康检测完成: {ok_count}/{len(targets)} 个源可达')
+            try:
+                for fut in as_completed(futs, timeout=30):
+                    src = futs[fut]
+                    try:
+                        ok, latency, err = fut.result()
+                        self.health[src.base] = {'ok': ok, 'latency': latency, 'error': err}
+                        if ok: ok_count += 1
+                        else: fail_count += 1
+                    except Exception:
+                        self.health[src.base] = {'ok': False, 'latency': 0, 'error': 'exception'}
+                        fail_count += 1
+            except Exception:
+                # 超时：剩余未完成的不等了，标记为未知
+                pass
+        unchecked = len(targets) - ok_count - fail_count
+        print(f'🔍 健康检测完成: {ok_count} 可用, {fail_count} 不可达, {unchecked} 未测')
 
     def _load(self):
         src_path = sys.argv[1] if len(sys.argv) > 1 else r'F:\86135\下载\墨辰整理书源大全7.1（禁止倒卖）【最新完整】.json'
