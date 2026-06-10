@@ -65,9 +65,9 @@ function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('show');
 }
 
-function switchTab(tab) {
+function switchTab(tab, e) {
   document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  (e || window.event).target.classList.add('active');
   document.getElementById('shelfPanel').style.display = tab === 'shelf' ? '' : 'none';
   document.getElementById('sourcesPanel').style.display = tab === 'sources' ? '' : 'none';
 }
@@ -190,8 +190,6 @@ async function loadSources() {
   try {
     const resp = await fetch('/api/sources');
     sources = await resp.json();
-    const on = sources.filter(s => s.enabled).length;
-    document.getElementById('sourceCount').textContent = `${on}/${sources.length} 个源已启用`;
     renderSources();
   } catch (e) {
     document.getElementById('sourceCount').textContent = '加载源失败';
@@ -199,6 +197,16 @@ async function loadSources() {
 }
 
 function renderSources() {
+  const total = sources.length;
+  const enabled = sources.filter(s => s.enabled).length;
+  const healthy = sources.filter(s => s.healthy).length;
+  const unchecked = sources.filter(s => s.healthy === null || s.healthy === undefined).length;
+
+  let statusHtml = `${enabled}/${total} 源已启用`;
+  if (healthy > 0) statusHtml += ` · <span style="color:var(--green)">${healthy} 可用</span>`;
+  if (unchecked > 0) statusHtml += ` · <span style="color:var(--amber)">${unchecked} 未测</span>`;
+  document.getElementById('sourceCount').innerHTML = statusHtml;
+
   const el = document.getElementById('sourcesPanel');
   const groups = {};
   sources.forEach(s => {
@@ -206,26 +214,37 @@ function renderSources() {
     if (!groups[g]) groups[g] = [];
     groups[g].push(s);
   });
-  const healthyCount = sources.filter(s => s.healthy).length;
-  document.getElementById('sourceCount').innerHTML =
-    `${sources.filter(s => s.enabled).length}/${sources.length} 源已启用 ·
-     <span style="color:var(--green)">${healthyCount} 可用</span>`;
-  let html = '';
+  let html = `<button class="btn btn-outline" style="width:100%;margin-bottom:12px" onclick="runHealthCheck()">🔍 检测源可用性</button>`;
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
     html += list.map(s => {
-      const healthDot = s.healthy === true ? '<span class="dot on"></span>' :
-                        s.healthy === false ? '<span class="dot off"></span>' :
-                        '<span class="dot unknown"></span>';
-      const latencyStr = s.latency ? ` ${s.latency}s` : '';
+      const dot = s.healthy === true ? 'on' : s.healthy === false ? 'off' : 'unknown';
       return `<div class="source-item" onclick="toggleSource('${esc(s.url)}')">
-        ${healthDot}
+        <span class="dot ${dot}"></span>
         <span class="name">${esc(s.name)}</span>
-        <span class="badge">${s.type}${latencyStr}</span>
+        <span class="badge">${s.type}</span>
       </div>`;
     }).join('');
   }
   el.innerHTML = html;
+}
+
+let healthCheckRunning = false;
+async function runHealthCheck() {
+  if (healthCheckRunning) return;
+  healthCheckRunning = true;
+  toast('🔍 开始检测源可用性...');
+  try {
+    await fetch('/api/health_check', { method: 'POST' });
+    // 等几秒让检测跑完
+    await new Promise(r => setTimeout(r, 3000));
+    await loadSources();
+    // 再刷新一次（检测通常 6-8 秒完成）
+    await new Promise(r => setTimeout(r, 5000));
+    await loadSources();
+    toast('✅ 检测完成');
+  } catch(e) { toast('检测失败'); }
+  healthCheckRunning = false;
 }
 
 async function toggleSource(url) {

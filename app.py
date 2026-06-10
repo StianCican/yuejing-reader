@@ -1230,56 +1230,88 @@ class SourceManager:
         self.sources = {}
         self.enabled = set()
         self.health = {}  # url → {'ok': bool, 'latency': float, 'error': str}
+        self._health_running = False
         self._load()
-        # 后台异步健康检测（不阻塞启动）
-        import threading
-        t = threading.Thread(target=self._health_check, daemon=True)
-        t.start()
 
-    def _health_check(self):
-        """启动后异步 ping 各源，标记可达性（轻量 HEAD/GET，不解析内容）"""
-        import time as _t
+    def run_health_check(self):
+        """手动触发源健康检测（域名去重，独立 session）"""
+        if self._health_running:
+            return {'status': 'running'}
+        self._health_running = True
+        import time as _t, threading, requests as _req
+        from urllib.parse import urlparse
+
+        # 独立 session（不影响用户请求）
+        hs = _req.Session()
+        hs.verify = False
+        hs.headers.update(session.headers)
+        hs.timeout = 3
+
         targets = list(self.sources.values())
-        print(f'🔍 开始健康检测 {len(targets)} 个源（后台运行约30秒）...')
 
-        def _ping(src):
-            """用 HTTP HEAD/GET 探测源的可达性"""
-            base = getattr(src, 'http_base', src.base)
-            if not base.startswith('http'):
-                return (False, 0, '无HTTP地址')
-            for method_name, do_stream in [('HEAD', False), ('GET', True)]:
+        # 域名去重：同域名只 ping 一次
+        domains = {}
+        for src in targets:
+            hb = getattr(src, 'http_base', src.base)
+            if hb.startswith('http'):
+                try:
+                    d = urlparse(hb).netloc
+                    if d not in domains:
+                        domains[d] = hb
+                except Exception:
+                    pass
+
+        def _ping(domain, url):
+            try:
+                t0 = _t.time()
+                resp = hs.head(url, timeout=3, allow_redirects=True)
+                return (domain, True, round(_t.time() - t0, 2))
+            except Exception:
                 try:
                     t0 = _t.time()
-                    if method_name == 'HEAD':
-                        resp = session.head(base, timeout=3, allow_redirects=True)
-                    else:
-                        resp = session.get(base, timeout=3, stream=True)
-                        resp.close()
-                    return (True, round(_t.time() - t0, 2), '')
+                    resp = hs.get(url, timeout=3, stream=True)
+                    resp.close()
+                    return (domain, True, round(_t.time() - t0, 2))
                 except Exception:
-                    continue
-            return (False, 0, '连接失败')
+                    return (domain, False, 0)
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        ok_count, fail_count = 0, 0
-        with ThreadPoolExecutor(max_workers=50) as pool:
-            futs = {pool.submit(_ping, s): s for s in targets}
-            try:
-                for fut in as_completed(futs, timeout=30):
-                    src = futs[fut]
+        def _run():
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            healthy_domains = set()
+            print(f'🔍 健康检测 {len(domains)} 个唯一域名...')
+            with ThreadPoolExecutor(max_workers=30) as pool:
+                futs = [pool.submit(_ping, d, u) for d, u in domains.items()]
+                try:
+                    for fut in as_completed(futs, timeout=12):
+                        try:
+                            d, ok, lat = fut.result()
+                            if ok:
+                                healthy_domains.add(d)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            # 映射回源
+            ok_count = 0
+            for src in targets:
+                hb = getattr(src, 'http_base', src.base)
+                if hb.startswith('http'):
                     try:
-                        ok, latency, err = fut.result()
-                        self.health[src.base] = {'ok': ok, 'latency': latency, 'error': err}
-                        if ok: ok_count += 1
-                        else: fail_count += 1
+                        d = urlparse(hb).netloc
+                        is_ok = d in healthy_domains
+                        self.health[src.base] = {'ok': is_ok, 'latency': 0, 'error': '' if is_ok else '不可达'}
+                        if is_ok:
+                            ok_count += 1
                     except Exception:
-                        self.health[src.base] = {'ok': False, 'latency': 0, 'error': 'exception'}
-                        fail_count += 1
-            except Exception:
-                # 超时：剩余未完成的不等了，标记为未知
-                pass
-        unchecked = len(targets) - ok_count - fail_count
-        print(f'🔍 健康检测完成: {ok_count} 可用, {fail_count} 不可达, {unchecked} 未测')
+                        self.health[src.base] = {'ok': False, 'latency': 0, 'error': '无效地址'}
+                else:
+                    self.health[src.base] = {'ok': False, 'latency': 0, 'error': '无HTTP地址'}
+            print(f'🔍 健康检测完成: {ok_count}/{len(targets)} 个源可达')
+            self._health_running = False
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {'status': 'started', 'domains': len(domains)}
 
     def _load(self):
         src_path = sys.argv[1] if len(sys.argv) > 1 else r'F:\86135\下载\墨辰整理书源大全7.1（禁止倒卖）【最新完整】.json'
@@ -1327,16 +1359,11 @@ class SourceManager:
         if source_filter:
             targets = [s for s in targets if source_filter in s.name or source_filter in s.base]
 
-        # ── 健康源优先 + 分层 ──
-        healthy = [s for s in targets if self.health.get(s.base, {}).get('ok')]
-        unhealthy = [s for s in targets if not self.health.get(s.base, {}).get('ok')]
-        json_h = [s for s in healthy if isinstance(s, JsonApiSource)]
-        js_h = [s for s in healthy if isinstance(s, JsSource)]
-        css_h = [s for s in healthy if isinstance(s, CssSource)]
-        json_u = [s for s in unhealthy if isinstance(s, JsonApiSource)]
-        js_u = [s for s in unhealthy if isinstance(s, JsSource)]
-        css_u = [s for s in unhealthy if isinstance(s, CssSource)]
-        tiered = json_h + js_h + css_h + json_u[:20] + js_u[:15] + css_u[:10]
+        # ── 智能分层：JSON优先 + JS次之 + CSS兜底 ──
+        json_targets = [s for s in targets if isinstance(s, JsonApiSource)]
+        js_targets   = [s for s in targets if isinstance(s, JsSource)]
+        css_targets  = [s for s in targets if isinstance(s, CssSource)]
+        tiered = json_targets + js_targets[:30] + css_targets[:20]
         tiered = tiered[:120]  # 硬上限 120 个源
 
         all_results = []
@@ -1423,6 +1450,11 @@ def api_sources():
             'latency': h.get('latency', 0),
         })
     return jsonify(sources)
+
+@app.route('/api/health_check', methods=['POST'])
+def api_health_check():
+    result = mgr.run_health_check()
+    return jsonify(result)
 
 @app.route('/api/toggle_source', methods=['POST'])
 def api_toggle():
