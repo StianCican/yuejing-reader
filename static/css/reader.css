@@ -59,6 +59,7 @@
   width:100%;margin-bottom:12px;accent-color:var(--accent)
 }
 .settings-panel .theme-btns{display:flex;gap:8px;margin-top:8px}
+.settings-panel h3{font-size:16px;font-family:var(--font-serif);margin-bottom:16px}
 .settings-panel .theme-btns button{
   flex:1;padding:10px;border-radius:var(--radius);
   font-size:13px;font-family:var(--font-serif);
@@ -66,6 +67,13 @@
 }
 .settings-panel .theme-btns button:hover{border-color:var(--accent)}
 .settings-panel .theme-btns button.active{border-color:var(--accent);background:var(--accent);color:#fff}
+
+/* ── 设置面板遮罩 ── */
+.settings-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.3);
+  z-index:89;display:none
+}
+.settings-overlay.show{display:block}
 
 /* ── 详情页 ── */
 .detail-header{display:flex;gap:24px;margin-bottom:32px}

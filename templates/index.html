@@ -104,29 +104,25 @@
   </div>
 </div>
 
-<!-- Settings Modal -->
-<div class="modal-overlay" id="settingsModal">
-  <div class="modal">
-    <span class="close" onclick="closeSettings()">&times;</span>
-    <h3>⚙ 阅读设置</h3>
-    <div style="margin-bottom:16px">
-      <label style="color:var(--muted);font-size:13px">字号：<span id="fontSizeVal">18</span>px</label>
-      <input type="range" min="14" max="28" value="18" style="width:100%" oninput="setFontSize(this.value)">
-    </div>
-    <div style="margin-bottom:16px">
-      <label style="color:var(--muted);font-size:13px">行高：<span id="lineHeightVal">2.0</span></label>
-      <input type="range" min="14" max="30" value="20" style="width:100%" oninput="setLineHeight(this.value)">
-    </div>
-    <div style="margin-bottom:16px">
-      <label style="color:var(--muted);font-size:13px">主题</label>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-outline" onclick="setTheme('')" style="background:#f7f5f0;color:#2c2416">宣纸</button>
-        <button class="btn btn-outline" onclick="setTheme('sepia')" style="background:#e8e0cc;color:#3d3528">青绿</button>
-        <button class="btn btn-outline" onclick="setTheme('dark')" style="background:#1a1814;color:#e8e4de">墨韵</button>
-      </div>
-    </div>
+<!-- Settings Panel (bottom slide-up) -->
+<div class="settings-panel" id="settingsPanel">
+  <div class="handle"></div>
+  <h3>⚙ 阅读设置</h3>
+  <label>字号：<span id="fontSizeVal">18</span>px</label>
+  <input type="range" min="14" max="28" value="18" oninput="setFontSize(this.value)">
+  <label>行高：<span id="lineHeightVal">2.0</span></label>
+  <input type="range" min="14" max="30" value="20" oninput="setLineHeight(this.value)">
+  <label>主题</label>
+  <div class="theme-btns">
+    <button onclick="setTheme('')" style="background:#f7f5f0;color:#2c2416">宣纸</button>
+    <button onclick="setTheme('sepia')" style="background:#e8e0cc;color:#3d3528">青绿</button>
+    <button onclick="setTheme('dark')" style="background:#1a1814;color:#e8e4de">墨韵</button>
   </div>
+  <button class="btn btn-outline" style="width:100%;margin-top:12px" onclick="closeSettings()">关闭</button>
 </div>
+
+<!-- Overlay for settings panel -->
+<div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>

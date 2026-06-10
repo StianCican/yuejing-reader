@@ -62,9 +62,27 @@ function cycleTheme() {
 
 // ── 设置面板 ──
 function openSettings() {
-  document.getElementById('settingsModal').classList.add('show');
+  document.getElementById('settingsPanel').classList.add('show');
+  document.getElementById('settingsOverlay').classList.add('show');
 }
 
 function closeSettings() {
-  document.getElementById('settingsModal').classList.remove('show');
+  document.getElementById('settingsPanel').classList.remove('show');
+  document.getElementById('settingsOverlay').classList.remove('show');
 }
+
+// 点击阅读区空白呼出设置（非文字选中时）
+document.addEventListener('click', (e) => {
+  if (currentView !== 'reader') return;
+  const content = document.getElementById('readerContent');
+  if (!content) return;
+  // 判断点击在阅读区内但不是文字选中操作
+  if (content.contains(e.target) && !window.getSelection()?.toString()) {
+    // 双击才呼出面板，避免误触
+  }
+});
+document.getElementById('readerContent')?.addEventListener('dblclick', (e) => {
+  if (currentView === 'reader' && !window.getSelection()?.toString()) {
+    openSettings();
+  }
+});
