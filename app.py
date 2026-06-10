@@ -1237,35 +1237,46 @@ class SourceManager:
         t.start()
 
     def _health_check(self):
-        """启动后异步 ping 各源，标记可用性"""
+        """启动后异步 ping 各源，标记可达性（轻量 HEAD/GET，不解析内容）"""
         import time as _t
-        targets = [s for s in self.sources.values() if isinstance(s, (JsonApiSource, CssSource))]
+        targets = list(self.sources.values())
         print(f'🔍 开始健康检测 {len(targets)} 个源...')
 
         def _ping(src):
+            """用 HTTP HEAD 探测源的可达性，极快"""
+            base = getattr(src, 'http_base', src.base)
+            if not base.startswith('http'):
+                return (False, 0, '无HTTP地址')
             try:
                 t0 = _t.time()
-                # 用搜索 API 做轻量探测（无关键词时可能返回空列表，但能测通断）
-                results = src.search('healthcheck_', page=1)
+                # HEAD 请求只拿头不拿体，10KB 以内，比搜索快 100 倍
+                resp = session.head(base, timeout=5, allow_redirects=True)
                 latency = _t.time() - t0
-                return (True, latency, '')
+                return (True, round(latency, 2), '')
             except Exception as e:
-                return (False, 0, str(e)[:80])
+                # HEAD 失败尝试 GET（某些服务器不支持 HEAD）
+                try:
+                    t0 = _t.time()
+                    resp = session.get(base, timeout=5, stream=True)
+                    resp.close()  # 立刻关闭，只测连通性
+                    latency = _t.time() - t0
+                    return (True, round(latency, 2), '')
+                except Exception as e2:
+                    return (False, 0, str(e2)[:60])
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
         ok_count = 0
-        with ThreadPoolExecutor(max_workers=30) as pool:
+        with ThreadPoolExecutor(max_workers=40) as pool:
             futs = {pool.submit(_ping, s): s for s in targets}
-            for fut in as_completed(futs, timeout=20):
+            for fut in as_completed(futs, timeout=25):
                 src = futs[fut]
-                url = src.base
+                key = src.base
                 try:
                     ok, latency, err = fut.result()
-                    self.health[url] = {'ok': ok, 'latency': round(latency, 2), 'error': err}
-                    if ok:
-                        ok_count += 1
+                    self.health[key] = {'ok': ok, 'latency': latency, 'error': err}
+                    if ok: ok_count += 1
                 except Exception:
-                    self.health[url] = {'ok': False, 'latency': 0, 'error': 'timeout'}
+                    self.health[key] = {'ok': False, 'latency': 0, 'error': 'timeout'}
         print(f'🔍 健康检测完成: {ok_count}/{len(targets)} 个源可达')
 
     def _load(self):
