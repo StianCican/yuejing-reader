@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>阅境 · 小说阅读器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@300;400;500;700&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/components.css">
+<link rel="stylesheet" href="/static/css/reader.css">
+<link rel="stylesheet" href="/static/css/home.css">
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1>阅 · 境</h1>
+      <p id="sourceCount">加载中...</p>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="active" onclick="switchTab('shelf')">📖 书架</button>
+      <button onclick="switchTab('sources')">⚙ 源管理</button>
+    </nav>
+    <div class="sidebar-content">
+      <div id="shelfPanel" class="sidebar-section"></div>
+      <div id="sourcesPanel" class="sidebar-section" style="display:none"></div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+      <div class="search-box">
+        <span class="icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="搜索小说..." onkeydown="if(event.key==='Enter')doSearch()">
+      </div>
+      <div class="nav-btns">
+        <button onclick="showHome()">首页</button>
+        <button onclick="history.back()">← 返回</button>
+      </div>
+    </div>
+
+    <div class="content" id="content">
+      <!-- Home -->
+      <div id="homeView" class="view active">
+        <div class="hero">
+          <h2 class="hero-title">阅 · 境</h2>
+          <p class="hero-subtitle">展开书卷，遇见另一个世界</p>
+          <div class="hero-search">
+            <input type="text" placeholder="搜索书名、作者..." onkeydown="if(event.key==='Enter'){document.getElementById('searchInput').value=this.value;doSearch()}">
+          </div>
+          <div class="hero-tags">
+            <span onclick="quickSearch('玄幻')">玄幻</span>
+            <span onclick="quickSearch('言情')">言情</span>
+            <span onclick="quickSearch('都市')">都市</span>
+            <span onclick="quickSearch('科幻')">科幻</span>
+            <span onclick="quickSearch('历史')">历史</span>
+          </div>
+        </div>
+        <div class="section-title">🔥 书架收藏</div>
+        <div id="homeShelf" class="book-grid"></div>
+      </div>
+
+      <!-- Search Results -->
+      <div id="searchView" class="view">
+        <div class="section-title">搜索结果 <span class="count" id="resultCount"></span></div>
+        <div id="searchResults" class="book-grid"></div>
+      </div>
+
+      <!-- Book Detail -->
+      <div id="detailView" class="view">
+        <div class="detail-header" id="detailHeader"></div>
+        <div class="detail-actions" id="detailActions"></div>
+        <div class="chapter-count" id="chapterCount"></div>
+        <div class="chapter-list" id="chapterList"></div>
+      </div>
+
+      <!-- Reader -->
+      <div id="readerView" class="view">
+        <div class="reader-progress"><div class="reader-progress-fill" id="progressFill"></div></div>
+        <div class="reader-wrap">
+          <div class="reader-nav">
+            <button class="btn btn-outline" id="prevChapter" onclick="navChapter(-1)">← 上一章</button>
+            <span class="title" id="chapterTitle"></span>
+            <button class="btn btn-outline" id="nextChapter" onclick="navChapter(1)">下一章 →</button>
+          </div>
+          <div class="reader-content" id="readerContent"></div>
+          <div class="reader-bottom">
+            <button class="btn btn-outline" onclick="showDetail()">📑 返回目录</button>
+            <button class="btn btn-outline" onclick="openSettings()">⚙ 阅读设置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading -->
+      <div id="loadingView" class="view">
+        <div class="loading"><div class="spinner"></div><p id="loadingText">正在搜索...</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <span class="close" onclick="closeSettings()">&times;</span>
+    <h3>⚙ 阅读设置</h3>
+    <div style="margin-bottom:16px">
+      <label style="color:var(--muted);font-size:13px">字号：<span id="fontSizeVal">18</span>px</label>
+      <input type="range" min="14" max="28" value="18" style="width:100%" oninput="setFontSize(this.value)">
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="color:var(--muted);font-size:13px">行高：<span id="lineHeightVal">2.0</span></label>
+      <input type="range" min="14" max="30" value="20" style="width:100%" oninput="setLineHeight(this.value)">
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="color:var(--muted);font-size:13px">主题</label>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-outline" onclick="setTheme('')" style="background:#f7f5f0;color:#2c2416">宣纸</button>
+        <button class="btn btn-outline" onclick="setTheme('sepia')" style="background:#e8e0cc;color:#3d3528">青绿</button>
+        <button class="btn btn-outline" onclick="setTheme('dark')" style="background:#1a1814;color:#e8e4de">墨韵</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Scripts: order matters — app defines globals, others extend them -->
+<script src="/static/js/app.js"></script>
+<script src="/static/js/reader.js"></script>
+<script src="/static/js/shelf.js"></script>
+<script src="/static/js/settings.js"></script>
+</body>
+</html>

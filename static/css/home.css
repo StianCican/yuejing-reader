@@ -1,0 +1,63 @@
+/* ════════════════════════════════════════════════════════════════
+   home.css — 首页 Hero、分类标签、书架展示
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Hero 区 ── */
+.hero{
+  text-align:center;padding:60px 20px 40px
+}
+.hero-title{
+  font-family:var(--font-calligraphy);
+  font-size:clamp(2.5rem,5vw,4rem);
+  font-weight:400;letter-spacing:.15em;
+  color:var(--text);margin-bottom:12px
+}
+.hero-subtitle{
+  color:var(--text-secondary);font-size:16px;
+  margin-bottom:32px;letter-spacing:.05em
+}
+.hero-search{
+  display:flex;justify-content:center;margin-bottom:24px
+}
+.hero-search input{
+  width:100%;max-width:500px;padding:14px 20px;
+  font-size:16px;border-radius:var(--radius-lg);
+  font-family:var(--font-serif)
+}
+.hero-tags{
+  display:flex;justify-content:center;flex-wrap:wrap;gap:8px
+}
+.hero-tags span{
+  padding:6px 18px;border:1px solid var(--border);
+  border-radius:20px;font-size:13px;color:var(--text-secondary);
+  cursor:pointer;transition:all .2s;
+  font-family:var(--font-serif)
+}
+.hero-tags span:hover{
+  border-color:var(--accent);color:var(--accent);
+  background:var(--surface2)
+}
+
+/* ── 区域标题 ── */
+.section-title{
+  font-size:18px;font-weight:600;font-family:var(--font-serif);
+  margin:32px 0 16px;display:flex;align-items:center;gap:8px
+}
+.section-title .count{font-size:13px;color:var(--muted)}
+
+/* ── 搜索提示 ── */
+.search-hint{display:flex;justify-content:center;margin-top:24px}
+.search-hint input{
+  width:100%;max-width:500px;padding:14px 20px;
+  font-size:16px;border-radius:var(--radius-lg)
+}
+
+/* ── 首页书架 ── */
+#homeShelf .empty{text-align:center;padding:40px;color:var(--muted)}
+
+/* ── 响应式 ── */
+@media(max-width:768px){
+  .hero{padding:40px 16px 24px}
+  .hero-title{font-size:clamp(2rem,8vw,3rem)}
+  .hero-subtitle{font-size:14px}
+}

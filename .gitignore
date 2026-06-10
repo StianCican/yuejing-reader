@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.tmp
+node_modules/
+.claude/
+__pycache__/
