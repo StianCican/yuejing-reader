@@ -9,12 +9,26 @@ let chapters = [];
 let currentChapterIdx = -1;
 let shelf = [];
 let sources = [];
+let readingProgress = {}; // { bookKey: chapterIdx }
 const S = localStorage;
+
+// ── 阅读进度存储 ──
+function getBookKey(b) {
+  return b.source_url + '|' + b.book_url;
+}
+function loadProgress() {
+  try { readingProgress = JSON.parse(S.getItem('readingProgress') || '{}'); } catch(e) { readingProgress = {}; }
+}
+function saveProgress(bookKey, chapterIdx) {
+  readingProgress[bookKey] = chapterIdx;
+  S.setItem('readingProgress', JSON.stringify(readingProgress));
+}
 
 // ── Init ──
 window.addEventListener('load', () => {
   loadShelf();
   loadSources();
+  loadProgress();
   applyReadingSettings();
 });
 
@@ -33,6 +47,18 @@ function showHome() {
 
 function showDetail() {
   if (currentBook) showView('detail');
+}
+
+function goBack() {
+  if (currentView === 'reader') {
+    showDetail();
+  } else if (currentView === 'detail') {
+    showView('search');
+  } else if (currentView === 'search') {
+    showHome();
+  } else {
+    showHome();
+  }
 }
 
 function toggleSidebar() {
@@ -142,13 +168,21 @@ function renderDetail() {
       <div class="intro">${esc(b.intro||'暂无简介')}</div>
     </div>`;
   const inShelf = shelf.some(s => s.source_url===b.source_url && s.book_url===b.book_url);
+  const bk = getBookKey(b);
+  const savedIdx = readingProgress[bk];
+  const hasProgress = savedIdx !== undefined && savedIdx >= 0 && savedIdx < chapters.length;
   document.getElementById('detailActions').innerHTML = `
-    ${chapters.length ? `<button class="btn btn-primary" onclick="readChapter(0)">📖 开始阅读</button>` : ''}
+    ${chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? '📖 继续阅读（第'+(savedIdx+1)+'章）' : '📖 开始阅读'}</button>` : ''}
     <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? '💔 取消收藏' : '❤️ 加入书架'}</button>`;
   document.getElementById('chapterCount').textContent = `📑 章节目录（${chapters.length} 章）`;
-  document.getElementById('chapterList').innerHTML = chapters.map((ch, i) =>
-    `<div class="chapter-item" onclick="readChapter(${i})">${esc(ch.name)}</div>`
-  ).join('');
+  document.getElementById('chapterList').innerHTML = chapters.map((ch, i) => {
+    const isCurrent = hasProgress && i === savedIdx;
+    const isRead = hasProgress && i < savedIdx;
+    let cls = 'chapter-item';
+    if (isCurrent) cls += ' current';
+    else if (isRead) cls += ' read';
+    return `<div class="${cls}" onclick="readChapter(${i})">${esc(ch.name)}</div>`;
+  }).join('');
 }
 
 // ── Sources ──

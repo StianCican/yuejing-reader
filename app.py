@@ -19,6 +19,15 @@ import requests as http_requests
 from bs4 import BeautifulSoup
 
 
+def _join_url(base, path):
+    """安全拼接 URL，处理 path 缺 / 前缀的情况（如纯 ID '9161264'）"""
+    if not path:
+        return ''
+    if path.startswith('http'):
+        return path
+    return urljoin(base.rstrip('/') + '/', path.lstrip('/'))
+
+
 def _parse_header(raw):
     """解析源 JSON 中的 header 字段——可能是 dict 或字符串"""
     if isinstance(raw, dict):
@@ -295,7 +304,10 @@ def extract_val(ctx, sel, default='', base_url=''):
         if val is not None:
             return str(val).strip()
     if isinstance(ctx, BeautifulSoup):
-        el = ctx.select_one(clean)
+        sel_fixed = re.sub(r'^@css:', '', clean)
+        sel_fixed = re.sub(r'@text$|@src$|@href$|@html$', '', sel_fixed)
+        sel_fixed = css_conv(sel_fixed)
+        el = ctx.select_one(sel_fixed)
         if el:
             return el.get_text(strip=True)
     return default
@@ -315,7 +327,10 @@ def extract_img(ctx, sel, base_url=''):
         if val:
             return urljoin(base_url, str(val)) if not str(val).startswith('http') else str(val)
     if isinstance(ctx, BeautifulSoup):
-        el = ctx.select_one(clean)
+        sel_fixed = re.sub(r'^@css:', '', clean)
+        sel_fixed = re.sub(r'@src$|@href$|@html$', '', sel_fixed)
+        sel_fixed = css_conv(sel_fixed)
+        el = ctx.select_one(sel_fixed)
         if el:
             src = el.get('data-src') or el.get('src') or el.get('data-original') or ''
             return urljoin(base_url, src) if src else ''
@@ -339,7 +354,10 @@ def extract_link(ctx, sel, base_url=''):
         if val:
             return str(val)
     if isinstance(ctx, BeautifulSoup):
-        el = ctx.select_one(clean)
+        sel_fixed = re.sub(r'^@css:', '', clean)
+        sel_fixed = re.sub(r'@text$|@src$|@href$|@html$', '', sel_fixed)
+        sel_fixed = css_conv(sel_fixed)
+        el = ctx.select_one(sel_fixed)
         if el:
             href = el.get('href') or el.get('data-href') or ''
             return urljoin(base_url, href) if href else ''
@@ -350,8 +368,13 @@ def css_conv(sel):
     if not sel:
         return sel
     s = sel.strip()
+    # 去掉 Legado 倒序标记
+    s = re.sub(r'^-', '', s)
+    s = re.sub(r'^@css:', '', s)
     s = re.sub(r'!0+$', '', s)
     s = re.sub(r'!([1-9]\d*)$', lambda m: f':nth-child(n+{int(m.group(1))+1})', s)
+    # 去掉 Legado 索引后缀 .N（如 .li.0 → .li）
+    s = re.sub(r'\.(\d+)(?=\s|$|@|\.|#)', '', s)
     s = s.replace('@', ' > ')
     s = re.sub(r'(?<!\.)\bclass\.', '.', s)
     s = re.sub(r'(?<!#)\bid\.', '#', s)
@@ -421,6 +444,22 @@ class JsonApiSource:
         h.update(self._headers)
         return h
 
+    def _is_css_detail(self):
+        """检测详情/目录规则是否使用 CSS 选择器（混合型源）"""
+        for rules in [self.bi_r, self.toc_r]:
+            for v in rules.values():
+                if isinstance(v, str) and ('@css:' in v or 'class.' in v or '@tag' in v):
+                    return True
+        return False
+
+    def _fetch_html(self, url):
+        """以 HTML 方式请求并解析为 BeautifulSoup"""
+        resp = http_requests.get(url, headers=self._req_headers(), timeout=15)
+        enc = resp.encoding
+        if not enc or enc.lower() == 'iso-8859-1':
+            resp.encoding = resp.apparent_encoding or 'utf-8'
+        return BeautifulSoup(resp.text, 'lxml')
+
     def search(self, kw, page=1):
         if self.search_url.startswith('http'):
             url = build_url(self.search_url, kw, page)
@@ -485,9 +524,13 @@ class JsonApiSource:
         return results
 
     def detail(self, book_url, search_data=None):
+        # 混合型源：详情走 HTML/CSS 解析
+        if self._is_css_detail():
+            return self._detail_css(book_url, search_data)
+
         init = self.bi_r.get('init', '').strip() if self.bi_r else ''
         if init and not init.startswith('@js'):
-            full = self.http_base + book_url if not book_url.startswith('http') else book_url
+            full = _join_url(self.http_base, book_url)
             try:
                 resp = http_requests.get(full, headers=self._req_headers(), timeout=15)
                 data = safe_json(resp)
@@ -521,8 +564,34 @@ class JsonApiSource:
         book['chapters'] = self._chapters(toc_url)
         return book
 
-    def _chapters(self, toc_url):
-        url = toc_url if toc_url.startswith('http') else self.http_base + toc_url
+    def _detail_css(self, book_url, search_data=None):
+        """CSS/HTML 混合型源的详情解析（类似 CssSource）"""
+        url = _join_url(self.http_base, book_url)
+        try:
+            soup = self._fetch_html(url)
+        except Exception:
+            return search_data or {}
+        bi = self.bi_r
+        book = {
+            'name': extract_val(soup, bi.get('name', '')) or (search_data.get('name', '') if search_data else ''),
+            'author': extract_val(soup, bi.get('author', '')) or (search_data.get('author', '') if search_data else ''),
+            'cover': extract_img(soup, bi.get('coverUrl', ''), self.http_base) or (search_data.get('cover', '') if search_data else ''),
+            'intro': extract_val(soup, bi.get('intro', '')) or (search_data.get('intro', '') if search_data else ''),
+            'kind': extract_val(soup, bi.get('kind', '')),
+            'last_chapter': extract_val(soup, bi.get('lastChapter', '')),
+        }
+        toc_url = self.toc_r.get('tocUrl', '') or bi.get('tocUrl', '')
+        if toc_url and '{{' in toc_url:
+            toc_url = resolve_tpl(toc_url, {})
+        book['chapters'] = self._chapters(toc_url or book_url, soup)
+        return book
+
+    def _chapters(self, toc_url, soup=None):
+        # 混合型源：使用 CSS 选择器解析 HTML
+        if soup is not None or self._is_css_detail():
+            return self._chapters_css(toc_url, soup)
+
+        url = _join_url(self.http_base, toc_url) if toc_url else ''
         try:
             resp = http_requests.get(url, headers=self._req_headers(), timeout=15)
             data = safe_json(resp)
@@ -558,8 +627,31 @@ class JsonApiSource:
             name = extract_val(ch, cn, base_url=self.http_base) or f'第{i+1}章'
             # 使用 _resolve_rule 统一处理 <js>、@js:、{{}} 模板
             curl = _resolve_rule(cu, ch, url)
-            if curl and not curl.startswith('http'):
-                curl = self.http_base + curl
+            curl = _join_url(self.http_base, curl) if curl else ''
+            result.append({'name': name, 'url': curl, 'index': i})
+        result.sort(key=lambda x: x.get('index', 0))
+        return result
+
+    def _chapters_css(self, toc_url, soup=None):
+        """CSS 混合型源的目录解析"""
+        if toc_url and toc_url != '#':
+            url = _join_url(self.http_base, toc_url)
+            try:
+                soup = self._fetch_html(url)
+            except Exception:
+                return []
+        if soup is None:
+            return []
+        cl_sel = css_conv(self.toc_r.get('chapterList', ''))
+        cn_sel = self.toc_r.get('chapterName', '')
+        cu_sel = self.toc_r.get('chapterUrl', '')
+        if not cl_sel or not cn_sel:
+            return []
+        items = soup.select(cl_sel)
+        result = []
+        for i, item in enumerate(items):
+            name = extract_val(item, cn_sel) or f'第{i+1}章'
+            curl = extract_link(item, cu_sel, self.http_base) if cu_sel else ''
             result.append({'name': name, 'url': curl, 'index': i})
         result.sort(key=lambda x: x.get('index', 0))
         return result
@@ -581,7 +673,7 @@ class JsonApiSource:
         else:
             url_part = ch_url
 
-        url = url_part if url_part.startswith('http') else self.http_base + url_part
+        url = _join_url(self.http_base, url_part)
         req_headers = self._req_headers()
         req_headers.update(extra_req_headers)
         try:
@@ -673,7 +765,7 @@ class CssSource:
         return results
 
     def detail(self, book_url, search_data=None):
-        url = book_url if book_url.startswith('http') else self.http_base + book_url
+        url = _join_url(self.http_base, book_url)
         try:
             soup = self._fetch(url)
         except Exception:
@@ -695,7 +787,7 @@ class CssSource:
 
     def _chapters(self, toc_url, soup=None):
         if toc_url and toc_url != '#':
-            url = toc_url if toc_url.startswith('http') else self.http_base + toc_url
+            url = _join_url(self.http_base, toc_url) if toc_url else ''
             try:
                 soup = self._fetch(url)
             except Exception:
@@ -717,7 +809,7 @@ class CssSource:
         return result
 
     def chapter_content(self, ch_url):
-        url = ch_url if ch_url.startswith('http') else self.http_base + ch_url
+        url = _join_url(self.http_base, ch_url)
         try:
             soup = self._fetch(url)
         except Exception:
@@ -904,7 +996,7 @@ class JsSource:
         # 对于 JS 源，详情页通常也是 JSON API，复用 JsonApiSource 的逻辑
         init = self.bi_r.get('init', '').strip() if self.bi_r else ''
         if init and not init.startswith('@js'):
-            full = book_url if book_url.startswith('http') else self.http_base + book_url
+            full = _join_url(self.http_base, book_url)
             try:
                 resp = http_requests.get(full, headers=self._req_headers(), timeout=10)
                 data = safe_json(resp)
@@ -939,7 +1031,7 @@ class JsSource:
         return book
 
     def _chapters(self, toc_url):
-        url = toc_url if toc_url.startswith('http') else self.http_base + toc_url
+        url = _join_url(self.http_base, toc_url) if toc_url else ''
         try:
             resp = http_requests.get(url, headers=self._req_headers(), timeout=10)
             data = safe_json(resp)
@@ -976,13 +1068,13 @@ class JsSource:
             # 使用 _resolve_rule 统一处理 <js>、@js:、{{}} 模板
             curl = _resolve_rule(cu, ch, url)
             if curl and not curl.startswith('http'):
-                curl = self.http_base + curl
+                curl = _join_url(self.http_base, curl) if curl else ''
             result.append({'name': name, 'url': curl, 'index': i})
         result.sort(key=lambda x: x.get('index', 0))
         return result
 
     def chapter_content(self, ch_url):
-        url = ch_url if ch_url.startswith('http') else self.http_base + ch_url
+        url = _join_url(self.http_base, ch_url)
         try:
             resp = http_requests.get(url, headers=self._req_headers(), timeout=10)
             data = safe_json(resp)

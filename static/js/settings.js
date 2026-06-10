@@ -7,9 +7,11 @@ function applyReadingSettings() {
   const fs = S.getItem('fontSize') || '18';
   const lh = S.getItem('lineHeight') || '2';
   const theme = S.getItem('theme') || '';
+  const ff = S.getItem('fontFamily') || 'serif';
   setFontSize(fs);
   setLineHeight(lh);
   setTheme(theme);
+  setFontFamily(ff);
   // 同步滑块和显示值
   const fontSizeVal = document.getElementById('fontSizeVal');
   const lineHeightVal = document.getElementById('lineHeightVal');
@@ -69,6 +71,22 @@ function openSettings() {
 function closeSettings() {
   document.getElementById('settingsPanel').classList.remove('show');
   document.getElementById('settingsOverlay').classList.remove('show');
+}
+
+// ── 字体切换 ──
+function setFontFamily(ff) {
+  const reader = document.getElementById('readerContent');
+  const fonts = {
+    'serif': 'var(--font-serif)',
+    'sans': 'var(--font-sans)',
+    'kai': 'var(--font-calligraphy)',
+  };
+  if (reader) reader.style.fontFamily = fonts[ff] || fonts['serif'];
+  S.setItem('fontFamily', ff);
+  // 更新按钮激活状态
+  document.querySelectorAll('.font-btns button').forEach(b => {
+    b.classList.toggle('active', b.dataset.font === ff);
+  });
 }
 
 // 点击阅读区空白呼出设置（非文字选中时）

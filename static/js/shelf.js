@@ -19,15 +19,19 @@ function renderShelf() {
     el.innerHTML = '<div class="empty" style="padding:20px"><p>书架空空如也</p></div>';
     return;
   }
-  el.innerHTML = '<h3>我的书架</h3>' + shelf.map(b =>
-    `<div class="shelf-item" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
+  el.innerHTML = '<h3>我的书架</h3>' + shelf.map(b => {
+    const bk = getBookKey(b);
+    const idx = readingProgress[bk];
+    const progressText = idx !== undefined ? `<div class="progress-badge">已读 ${idx+1} 章</div>` : '';
+    return `<div class="shelf-item" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
       <div class="cover">${b.cover ? `<img src="${esc(b.cover)}" onerror="this.parentElement.innerHTML='📕'">` : '📕'}</div>
       <div class="info">
         <div class="name">${esc(b.name)}</div>
         <div class="author">${esc(b.author||'')}</div>
+        ${progressText}
       </div>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
 }
 
 // ── 首页书架 ──

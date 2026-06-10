@@ -104,6 +104,8 @@
   transition:all .2s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 }
 .chapter-item:hover{border-color:var(--accent);background:var(--surface2)}
+.chapter-item.read{color:var(--muted);background:var(--surface2)}
+.chapter-item.current{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:600}
 
 /* ── 响应式 ── */
 @media(max-width:768px){

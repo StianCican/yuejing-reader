@@ -34,6 +34,11 @@ async function readChapter(idx) {
     }
     showView('reader');
     document.getElementById('content').scrollTop = 0;
+    // 保存阅读进度
+    if (currentBook) {
+      const bk = getBookKey(currentBook);
+      saveProgress(bk, idx);
+    }
     // 阅读模式：隐藏侧边栏
     if (window.innerWidth <= 768) {
       document.getElementById('sidebar').classList.add('hidden');
