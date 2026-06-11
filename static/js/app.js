@@ -12,6 +12,16 @@ let sources = [];
 let readingProgress = {}; // { bookKey: chapterIdx }
 const S = localStorage;
 
+// ── 图片代理 ──
+function proxyUrl(url, referer) {
+  if (!url || !url.startsWith('http')) return url;
+  // 本地/相对路径无需代理
+  if (url.startsWith('/') || url.startsWith(window.location.origin)) return url;
+  let proxy = '/api/proxy?url=' + encodeURIComponent(url);
+  if (referer) proxy += '&referer=' + encodeURIComponent(referer);
+  return proxy;
+}
+
 // ── 阅读进度存储 ──
 function getBookKey(b) {
   return b.source_url + '|' + b.book_url;
@@ -73,6 +83,16 @@ function switchTab(tab, e) {
 }
 
 // ── Search ──
+let currentSearchType = '';  // '' / '0' / '1' / '2' / '4'
+
+function setSearchType(t, e) {
+  currentSearchType = t;
+  document.querySelectorAll('.type-tab').forEach(b => b.classList.remove('active'));
+  if (e && e.target) e.target.classList.add('active');
+  const kw = document.getElementById('searchInput').value.trim();
+  if (kw) doSearch();
+}
+
 async function doSearch() {
   const kw = document.getElementById('searchInput').value.trim();
   if (!kw) return;
@@ -90,7 +110,9 @@ async function doSearch() {
     </div>`
   ).join('');
   try {
-    const resp = await fetch(`/api/search?q=${encodeURIComponent(kw)}`);
+    let url = `/api/search?q=${encodeURIComponent(kw)}`;
+    if (currentSearchType) url += `&type=${currentSearchType}`;
+    const resp = await fetch(url);
     const results = await resp.json();
     document.getElementById('resultCount').textContent = `共 ${results.length} 条结果`;
     renderSearchResults(results);
@@ -114,7 +136,7 @@ function renderSearchResults(results) {
 }
 
 function bookCard(b, i) {
-  const cover = b.cover ? `<img src="${esc(b.cover)}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
+  const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
   const sourceHtml = b.source_name ? `<div class="source"><span class="dot"></span>${esc(b.source_name)}</div>` : '';
   return `<div class="book-card" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
     <div class="cover"><div class="placeholder">${cover}</div></div>
@@ -153,7 +175,7 @@ async function openBook(b) {
 
 function renderDetail() {
   const b = currentBook;
-  const cover = b.cover ? `<img src="${esc(b.cover)}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
+  const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
   document.getElementById('detailHeader').innerHTML = `
     <div class="cover"><div class="placeholder">${cover}</div></div>
     <div class="info">
@@ -199,12 +221,16 @@ async function loadSources() {
 function renderSources() {
   const total = sources.length;
   const enabled = sources.filter(s => s.enabled).length;
-  const healthy = sources.filter(s => s.healthy).length;
-  const unchecked = sources.filter(s => s.healthy === null || s.healthy === undefined).length;
+  const okCount = sources.filter(s => s.status === 'ok').length;
+  const partialCount = sources.filter(s => s.status === 'partial').length;
+  const deadCount = sources.filter(s => s.status === 'dead').length;
+  const untested = sources.filter(s => !s.status).length;
 
   let statusHtml = `${enabled}/${total} 源已启用`;
-  if (healthy > 0) statusHtml += ` · <span style="color:var(--green)">${healthy} 可用</span>`;
-  if (unchecked > 0) statusHtml += ` · <span style="color:var(--amber)">${unchecked} 未测</span>`;
+  if (okCount > 0) statusHtml += ` · <span style="color:var(--green)">${okCount} 可用</span>`;
+  if (partialCount > 0) statusHtml += ` · <span style="color:var(--amber)">${partialCount} 部分</span>`;
+  if (deadCount > 0) statusHtml += ` · <span style="color:var(--red)">${deadCount} 失效</span>`;
+  if (untested > 0) statusHtml += ` · <span style="color:var(--muted)">${untested} 未测</span>`;
   document.getElementById('sourceCount').innerHTML = statusHtml;
 
   const el = document.getElementById('sourcesPanel');
@@ -218,8 +244,13 @@ function renderSources() {
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
     html += list.map(s => {
-      const dot = s.healthy === true ? 'on' : s.healthy === false ? 'off' : 'unknown';
-      return `<div class="source-item" onclick="toggleSource('${esc(s.url)}')">
+      // status: 'ok'(绿) / 'partial'(黄) / 'dead'(红) / null(灰)
+      let dot = 'unknown';
+      let title = '未检测';
+      if (s.status === 'ok')      { dot = 'on';  title = '可用：搜索有结果'; }
+      else if (s.status === 'partial') { dot = 'partial'; title = '部分：域名通但搜索状态不明'; }
+      else if (s.status === 'dead')  { dot = 'off'; title = '失效：域名不可达'; }
+      return `<div class="source-item" onclick="toggleSource('${esc(s.url)}')" title="${title}">
         <span class="dot ${dot}"></span>
         <span class="name">${esc(s.name)}</span>
         <span class="badge">${s.type}</span>
@@ -233,16 +264,17 @@ let healthCheckRunning = false;
 async function runHealthCheck() {
   if (healthCheckRunning) return;
   healthCheckRunning = true;
-  toast('🔍 开始检测源可用性...');
+  toast('🔍 阶段1：检测域名连通性...');
   try {
     await fetch('/api/health_check', { method: 'POST' });
-    // 等几秒让检测跑完
-    await new Promise(r => setTimeout(r, 3000));
-    await loadSources();
-    // 再刷新一次（检测通常 6-8 秒完成）
+    // 阶段1：域名 ping（~5秒）
     await new Promise(r => setTimeout(r, 5000));
     await loadSources();
-    toast('✅ 检测完成');
+    // 阶段2：搜索测试（~15-20秒）
+    toast('🔍 阶段2：测试搜索能力...');
+    await new Promise(r => setTimeout(r, 15000));
+    await loadSources();
+    toast('✅ 检测完成——查看源列表状态点');
   } catch(e) { toast('检测失败'); }
   healthCheckRunning = false;
 }

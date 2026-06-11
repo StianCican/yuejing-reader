@@ -23,8 +23,21 @@ async function readChapter(idx) {
     const resp = await fetch(`/api/chapter?${params}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+
+    const readerContent = document.getElementById('readerContent');
+    readerContent.className = 'reader-content';  // reset class
     document.getElementById('chapterTitle').textContent = ch.name;
-    document.getElementById('readerContent').innerHTML = renderContent(data.content);
+
+    // 按内容类型路由
+    const ctype = data.content_type || 'text';
+    if (ctype === 'comic') {
+      renderComicReader(data.images || [], ch.name, data.source_url || currentBook.source_url);
+    } else if (ctype === 'audio') {
+      renderAudioPlayer(data.audio_url, data.content || '', ch.name);
+    } else {
+      readerContent.innerHTML = renderContent(data.content);
+    }
+
     document.getElementById('prevChapter').disabled = idx <= 0;
     document.getElementById('nextChapter').disabled = idx >= chapters.length - 1;
     // 更新进度条
@@ -49,6 +62,40 @@ async function readChapter(idx) {
   }
 }
 
+// ── 音频播放器 ──
+function renderAudioPlayer(audioUrl, fallbackText, title) {
+  const el = document.getElementById('readerContent');
+  el.className = 'audio-reader';
+
+  const hasAudio = audioUrl && audioUrl.startsWith('http');
+  let html = `<div class="audio-player">
+    <div class="audio-cover">🎧</div>
+    <div class="audio-info">
+      <div class="audio-title">${esc(title || '')}</div>
+      <div class="audio-sub">听书 · 音频</div>
+    </div>`;
+
+  if (hasAudio) {
+    html += `<audio controls autoplay class="audio-ctrl" src="${esc(audioUrl)}">
+      您的浏览器不支持音频播放
+    </audio>`;
+  } else {
+    html += `<div class="audio-no-src">⚠️ 未检测到音频地址</div>`;
+  }
+
+  html += `</div>`;
+
+  // 如果有文本内容（歌词/文案），也展示出来
+  if (fallbackText && fallbackText.trim()) {
+    html += `<details class="audio-text-wrap">
+      <summary>📄 文本内容</summary>
+      <div class="reader-content" style="margin-top:12px">${renderContent(fallbackText)}</div>
+    </details>`;
+  }
+
+  el.innerHTML = html;
+}
+
 function navChapter(dir) {
   readChapter(currentChapterIdx + dir);
 }
@@ -63,5 +110,9 @@ document.addEventListener('keydown', (e) => {
     case 'ArrowRight': navChapter(1);  break;
     case 'Escape':     showDetail();   break;
     case 't':          cycleTheme();   break;
+    // 漫画模式：上下翻页
+    case 'ArrowDown':  comicScrollPage(1);  break;
+    case 'ArrowUp':    comicScrollPage(-1); break;
+    case ' ':          comicScrollPage(1); e.preventDefault(); break;  // 空格翻页
   }
 });

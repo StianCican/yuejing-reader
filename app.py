@@ -2,7 +2,7 @@
 本地小说聚合阅读器
 从 Legado 书源 JSON 加载规则，聚合多个网站的小说内容，浏览器打开即用。
 """
-import json, re, sys, os, subprocess, ast
+import json, re, sys, os, ast
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -13,10 +13,11 @@ if sys.platform == 'win32':
         sys.stderr.reconfigure(encoding='utf-8')
     except Exception:
         pass
-from urllib.parse import urljoin, quote, urlencode
-from flask import Flask, request, jsonify, render_template
+from urllib.parse import urljoin, quote, urlencode, urlparse
+from flask import Flask, request, jsonify, render_template, Response
 import requests as http_requests
 from bs4 import BeautifulSoup
+import socket, ipaddress
 
 
 def _join_url(base, path):
@@ -64,37 +65,75 @@ session.headers.update({
 })
 session.timeout = 5
 
-# ── Legado JS 执行器 ────────────────────────────────────────────
-JS_RUNNER = Path(__file__).parent / 'js_runner.js'
+# ── Legado JS 执行器（双路径引擎）──────────────────────────────
+from js_runtime import get_runtime
 
 def run_legado_js(js_code, result_value='', source_url=''):
-    """调用 Node.js 执行 Legado 书源中的 <js> 和 @js: 代码块"""
-    runner = Path(JS_RUNNER) if isinstance(JS_RUNNER, str) else JS_RUNNER
-    if not runner.exists():
-        return str(result_value)
+    """调用双路径 JS 引擎执行 Legado 书源中的 <js> 和 @js: 代码块
+    简单变换走 PyMiniRacer（~1ms），需要 ajax 的走持久 NodeWorker（~5ms）"""
     try:
-        proc = subprocess.run(
-            ['node', str(runner)],
-            input=json.dumps({
-                'code': str(js_code),
-                'result': str(result_value),
-                'sourceUrl': str(source_url),
-                'key': '',
-                'page': 1,
-                'headers': {},
-                'store': {},
-            }),
-            capture_output=True, text=True, encoding='utf-8', timeout=20,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            res = json.loads(proc.stdout)
-            if 'error' not in res:
-                val = res.get('result', result_value)
-                return str(val) if val is not None else str(result_value)
-    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception):
-        pass
-    return str(result_value)
+        return get_runtime().run_legado_js(js_code, result_value, source_url)
+    except Exception:
+        return str(result_value)
+
+
+# ── Legado @put/@get 变量系统 ──
+# 全局变量存储（线程局部）。Legado 源中常用 @put:{key:selector} 存值，@get:{key} 取值。
+import threading
+_var_store = threading.local()
+
+
+def _get_vars():
+    """获取当前线程的变量字典"""
+    if not hasattr(_var_store, 'data'):
+        _var_store.data = {}
+    return _var_store.data
+
+
+def _set_var(key, value):
+    """存变量"""
+    _get_vars()[key] = str(value) if value is not None else ''
+
+
+def _read_var(key):
+    """取变量"""
+    return _get_vars().get(key, '')
+
+
+def _resolve_get_vars(rule):
+    """将规则中的 @get:{key} 替换为变量值"""
+    if not rule or '@get:' not in rule:
+        return rule
+    def _repl(m):
+        key = m.group(1).strip()
+        return _read_var(key)
+    return re.sub(r'@get:\{([^}]+)\}', _repl, rule)
+
+
+def _process_put_vars(rule, ctx, base_url=''):
+    """处理 @put:{key:selector, key2:selector2}，把提取到的值存入变量，
+    返回剥离 @put 后的规则字符串"""
+    if not rule or '@put:' not in rule:
+        return rule
+    matches = list(re.finditer(r'@put:\{([^}]+)\}', rule))
+    for m in matches:
+        body = m.group(1)
+        # 解析 key:selector 对（支持逗号分隔多个）
+        for pair in body.split(','):
+            pair = pair.strip()
+            if ':' not in pair:
+                continue
+            var_key, selector = pair.split(':', 1)
+            var_key, selector = var_key.strip(), selector.strip()
+            if not var_key or not selector:
+                continue
+            try:
+                val = _resolve_rule(selector, ctx, base_url)
+                _set_var(var_key, val)
+            except Exception:
+                pass
+    # 剥离所有 @put 块
+    return re.sub(r'@put:\{[^}]*\}', '', rule).strip()
 
 
 def _split_rule(rule):
@@ -108,9 +147,10 @@ def _split_rule(rule):
     """
     if not rule:
         return '', '', ''
-    # 去掉 ## 后处理标记 和 @get: 标记
+    # 去掉 ## 后处理标记（@get:{key} 不再剥离，由 _resolve_rule 解析替换）
     clean = re.sub(r'##[^#\n]*(?:##[^#\n]*)*$', '', rule)
-    clean = re.sub(r'@get:\{[^}]*\}', '', clean).strip()
+    # @put:{key:selector} 由 _resolve_rule 处理，此处先剥离以简化后续解析
+    clean = re.sub(r'@put:\{[^}]*\}', '', clean).strip()
     if not clean:
         return '', '', ''
 
@@ -144,6 +184,12 @@ def _split_rule(rule):
 
 def _resolve_rule(rule, data_item, base_url=''):
     """解析完整规则并返回最终值"""
+    if not rule:
+        return ''
+    # 先替换 @get:{key} 为变量值
+    rule = _resolve_get_vars(rule)
+    # 处理 @put:{key:selector}，把提取的值存入变量后剥离
+    rule = _process_put_vars(rule, data_item, base_url)
     if not rule:
         return ''
     json_path, js_code, url_tpl = _split_rule(rule)
@@ -287,16 +333,40 @@ def walk_path(data, path):
 def extract_val(ctx, sel, default='', base_url=''):
     if not sel:
         return default
+    # 先解析 @get:{key} 变量
+    sel = _resolve_get_vars(sel)
+    # 处理 @put:{key:selector}
+    sel = _process_put_vars(sel, ctx, base_url)
+    if not sel:
+        return default
     # dict 上下文 + 复杂规则
     if isinstance(ctx, dict):
         if '<js>' in sel or '@js:' in sel or '{{' in sel:
             val = _resolve_rule(sel, ctx, base_url)
             return val if val else default
-        # || 回退 + ## 后处理
+        # || 回退（任一成功即返回）
         parts = sel.split('||')
         for part in parts:
-            p = re.sub(r'@get:\{[^}]*\}', '', part).strip()
+            p = part.strip()
             if not p:
+                continue
+            # && 链：每个子规则独立提取后拼接
+            if '&&' in p:
+                pieces = []
+                for sub in p.split('&&'):
+                    sub = sub.strip()
+                    if not sub:
+                        continue
+                    base_p, hash_rules = _parse_hash_rules(sub)
+                    base_p = base_p.strip()
+                    if not base_p:
+                        continue
+                    key = base_p[2:] if base_p.startswith('$.') else base_p
+                    val = walk_path(ctx, key) if '.' in key else ctx.get(key)
+                    if val is not None:
+                        pieces.append(_apply_hash_rules(str(val).strip(), hash_rules))
+                if pieces:
+                    return ' '.join(pieces)
                 continue
             base_p, hash_rules = _parse_hash_rules(p)
             base_p = base_p.strip()
@@ -404,7 +474,7 @@ def _apply_hash_rules(value, rules):
     return value
 
 def _try_css_select(soup, sel_parts, base_url='', extract='text'):
-    """对多段 CSS 选择器逐段尝试（支持 || 回退）
+    """对多段 CSS 选择器逐段尝试（支持 || 回退、&& 链拼接）
     sel_parts: ['selector1', 'selector2', ...]
     extract: 'text' | 'src' | 'href'
     """
@@ -412,50 +482,106 @@ def _try_css_select(soup, sel_parts, base_url='', extract='text'):
         part = part.strip()
         if not part:
             continue
-        # 处理 ## 后处理规则
-        base_part, hash_rules = _parse_hash_rules(part)
-        base_part = base_part.strip()
-        if not base_part:
+        # && 链：每个子选择器独立提取后拼接
+        if '&&' in part:
+            pieces = []
+            for sub in part.split('&&'):
+                sub = sub.strip()
+                if not sub:
+                    continue
+                v = _single_css_extract(soup, sub, extract)
+                if v:
+                    pieces.append(v)
+            if pieces:
+                return ' '.join(pieces)
             continue
-        # 转换选择器
-        sel_fixed = re.sub(r'^@css:', '', base_part)
-        sel_fixed = css_conv(sel_fixed)
-        if not sel_fixed:
-            continue
-        try:
-            el = soup.select_one(sel_fixed)
-            if el:
-                if extract == 'src':
-                    val = el.get('data-src') or el.get('src') or el.get('data-original') or ''
-                elif extract == 'href':
-                    val = el.get('href') or el.get('data-href') or ''
-                else:
-                    val = el.get_text(strip=True)
-                if val:
-                    return _apply_hash_rules(val, hash_rules)
-        except Exception:
-            continue
+        v = _single_css_extract(soup, part, extract)
+        if v:
+            return v
+    return ''
+
+
+def _single_css_extract(soup, part, extract='text'):
+    """单段 CSS 选择器提取（不含 || / &&），含 ## 后处理"""
+    base_part, hash_rules = _parse_hash_rules(part)
+    base_part = base_part.strip()
+    if not base_part:
+        return ''
+    sel_fixed = re.sub(r'^@css:', '', base_part)
+    sel_fixed = css_conv(sel_fixed)
+    if not sel_fixed:
+        return ''
+    try:
+        el = soup.select_one(sel_fixed)
+        if el:
+            if extract == 'src':
+                val = el.get('data-src') or el.get('src') or el.get('data-original') or ''
+            elif extract == 'href':
+                val = el.get('href') or el.get('data-href') or ''
+            else:
+                val = el.get_text(strip=True)
+            if val:
+                return _apply_hash_rules(val, hash_rules)
+    except Exception:
+        pass
     return ''
 
 
 def css_conv(sel):
-    """Legado CSS 选择器 → 标准 CSS"""
+    """Legado CSS 选择器 → 标准 CSS（修复多项缺陷）
+
+    支持转换：
+    - @@ → 空格（后代选择器，注意：必须在 @ 之前处理）
+    - @  → ' > '（直接子选择器）
+    - <  → ' ' （Legado 父选择器；BS4 无父选择器，降级为后代）
+    - !N → :nth-child(n+N+1)（1-based 偏移）
+    - !-N → :nth-last-child(N)（逆序）
+    - :eq(N) → :nth-child(N+1)
+    - :lt(N) → :nth-child(-n+N)
+    - :gt(N) → :nth-child(n+N+2)
+    - class.x → .x；id.x → #x；tag.x → x
+    - @text / @src / @href / @html / @textNodes / @outerHtml 等属性后缀剥离
+    """
     if not sel:
         return sel
     s = sel.strip()
     # 去掉 Legado 倒序标记
     s = re.sub(r'^-', '', s)
     s = re.sub(r'^@css:', '', s)
-    s = re.sub(r'!0+$', '', s)
-    s = re.sub(r'!([1-9]\d*)$', lambda m: f':nth-child(n+{int(m.group(1))+1})', s)
-    # 去掉 Legado 索引后缀 .N（如 .li.0 → .li）
-    s = re.sub(r'\.(\d+)(?=\s|$|@|\.|#)', '', s)
+
+    # 先剥离属性提取后缀（必须在 @→> 转换之前，否则会被破坏）
+    for suf in ['@text', '@src', '@href', '@html', '@textNodes',
+                '@outerHtml', '@innerHtml', '@data', '@all',
+                '@ownText', '@attr']:
+        # 末尾或后跟空格/||/##/&&
+        s = re.sub(re.escape(suf) + r'(?=\s|$|\||#|&)', '', s)
+
+    # 必须先处理 @@（后代）再处理 @（直接子）
+    s = s.replace('@@', ' ')
     s = s.replace('@', ' > ')
+
+    # Legado 父选择器 < —— BS4 不支持，降级为后代（剥离）
+    s = re.sub(r'\s*<\s*', ' ', s)
+
+    # 末尾索引：!0 → 剥离，!N → :nth-child(n+N+1)，!-N → :nth-last-child(N)
+    s = re.sub(r'!0+$', '', s)
+    s = re.sub(r'!-(\d+)', lambda m: f':nth-last-child({m.group(1)})', s)
+    s = re.sub(r'!([1-9]\d*)$', lambda m: f':nth-child(n+{int(m.group(1))+1})', s)
+
+    # jQuery 风格伪类 → 标准 nth-child
+    s = re.sub(r':eq\((\d+)\)', lambda m: f':nth-child({int(m.group(1))+1})', s)
+    s = re.sub(r':lt\((\d+)\)', lambda m: f':nth-child(-n+{m.group(1)})', s)
+    s = re.sub(r':gt\((\d+)\)', lambda m: f':nth-child(n+{int(m.group(1))+2})', s)
+
+    # 去掉 Legado 索引后缀 .N（如 .li.0 → .li）
+    s = re.sub(r'\.(\d+)(?=\s|$|>|\.|#|\[|:)', '', s)
+
+    # class./id./tag. 前缀转换
     s = re.sub(r'(?<!\.)\bclass\.', '.', s)
     s = re.sub(r'(?<!#)\bid\.', '#', s)
+    s = re.sub(r'\btag\.', '', s)
     s = re.sub(r'\btag\b', '', s)
-    for suf in ['@text', '@src', '@href', '@html']:
-        s = s.replace(suf, '')
+
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
@@ -490,6 +616,243 @@ def merge(base, extra):
     return base
 
 
+# ── 多页章节内容 + replaceRegex ──
+def _fetch_full_content(source, ch_url, max_pages=10):
+    """多页章节内容获取 —— 自动追踪 nextContentUrl，拼接多页，应用 replaceRegex"""
+    cr = source.content_r
+    all_texts = []
+    visited = set()
+    current_url = ch_url
+
+    for _ in range(max_pages):
+        if not current_url or current_url in visited:
+            break
+        visited.add(current_url)
+
+        page_text, next_url = _extract_single_page(source, current_url, cr)
+        if page_text:
+            all_texts.append(page_text)
+        if not next_url:
+            break
+        current_url = next_url
+
+    text = '\n'.join(all_texts)
+
+    # 应用 replaceRegex
+    rr = cr.get('replaceRegex', '')
+    if rr and text:
+        text = _apply_replace_regex(text, rr)
+
+    return text
+
+
+def _extract_single_page(source, url, content_rules):
+    """提取单页内容 + 下一页URL，返回 (text, next_url)"""
+    from urllib.parse import urljoin as _uj
+
+    content_rule = content_rules.get('content', '')
+    next_rule = content_rules.get('nextContentUrl', '')
+
+    try:
+        # 根据源类型获取数据
+        if isinstance(source, CssSource):
+            soup = source._fetch(url)
+            data = soup
+            base_url = url
+        elif isinstance(source, JsSource):
+            resp = http_requests.get(url, headers=source._req_headers(), timeout=10)
+            data = safe_json(resp)
+            if data is None:
+                return ('（无法解析章节内容）', None)
+            base_url = url
+        else:  # JsonApiSource
+            # 处理 POST 格式
+            post_body = None
+            extra_headers = {}
+            actual_url = url
+            if ',{' in url and '"method"' in url:
+                idx = url.index(',{')
+                actual_url = url[:idx]
+                try:
+                    spec = json.loads(url[idx + 1:])
+                    if spec.get('method', 'GET').upper() == 'POST':
+                        post_body = spec.get('body', {})
+                    extra_headers = spec.get('headers', {})
+                except (json.JSONDecodeError, Exception):
+                    pass
+            full_url = _join_url(source.http_base, actual_url)
+            req_headers = source._req_headers()
+            req_headers.update(extra_headers)
+            if post_body is not None:
+                resp = http_requests.post(full_url, json=post_body, headers=req_headers, timeout=15)
+            else:
+                resp = http_requests.get(full_url, headers=req_headers, timeout=15)
+            data = safe_json(resp)
+            if data is None:
+                return ('（无法解析章节内容）', None)
+            base_url = full_url
+
+        # 提取正文
+        text = ''
+        if content_rule:
+            val = _resolve_rule(content_rule, data, base_url)
+            if val:
+                text = clean_text(val)
+        else:
+            text = clean_text(str(data))
+
+        # 提取下一页URL
+        next_url = None
+        if next_rule and text:
+            nu = _resolve_rule(next_rule, data, base_url)
+            if nu and nu.startswith(('http', '/')):
+                if isinstance(source, JsonApiSource):
+                    next_url = _uj(source.http_base, nu)
+                elif isinstance(source, CssSource):
+                    next_url = _uj(source.http_base, nu)
+                else:
+                    next_url = _uj(source.http_base, nu)
+
+        return (text, next_url)
+    except Exception:
+        return ('（获取章节失败）', None)
+
+
+def _apply_replace_regex(text, rr):
+    """应用 Legado 的 replaceRegex 规则"""
+    if not rr:
+        return text
+    if isinstance(rr, str):
+        try:
+            rr = json.loads(rr)
+        except (json.JSONDecodeError, Exception):
+            return text
+    if not isinstance(rr, list):
+        return text
+    for rule in rr:
+        if isinstance(rule, dict):
+            pattern = rule.get('pattern', '') or rule.get('regex', '')
+            replacement = rule.get('replacement', '') or rule.get('replacement', '')
+        elif isinstance(rule, list) and len(rule) >= 2:
+            pattern, replacement = rule[0], rule[1]
+        else:
+            continue
+        try:
+            text = re.sub(pattern, replacement, text)
+        except (re.error, Exception):
+            pass
+    return text
+
+
+# ── 通用CSS回退选择器 ──
+GENERIC_CONTENT_SELECTORS = [
+    '#content', '.content', '#booktxt', '#chaptercontent',
+    '#TextContent', '.chapter-content', '#chapter-content',
+    '.read-content', '#htmlContent', '#BookText',
+    'article', '.post-content', '.entry-content', '.article-content',
+]
+
+
+def _fallback_content(soup):
+    """Legado 规则失败时用通用 CSS 选择器兜底"""
+    for sel in GENERIC_CONTENT_SELECTORS:
+        el = soup.select_one(sel)
+        if el:
+            text = el.get_text(strip=True)
+            if len(text) > 100:
+                return clean_text(text)
+    return ''
+
+
+# ── 漫画图片提取 ──
+def _extract_images_from_text(text, base_url=''):
+    """从富文本/HTML 中提取所有图片 URL"""
+    if not text:
+        return []
+    urls = []
+    # <img src="..."> 标签
+    for m in re.finditer(r'<img[^>]+(?:src|data-src|data-original)\s*=\s*["\']([^"\']+)["\']', text, re.IGNORECASE):
+        url = m.group(1).strip()
+        if url and not url.startswith('data:'):
+            urls.append(url)
+    # 直接的图片URL（无img标签）
+    if not urls:
+        for m in re.finditer(r'https?://[^\s"\'<>]+\.(?:jpg|jpeg|png|webp|gif|bmp)(?:\?[^\s"\'<>]*)?', text, re.IGNORECASE):
+            urls.append(m.group(0))
+    # 转绝对URL
+    out = []
+    for u in urls:
+        if u.startswith('//'):
+            u = 'https:' + u
+        elif not u.startswith('http'):
+            u = urljoin(base_url, u) if base_url else u
+        if u not in out:
+            out.append(u)
+    return out
+
+
+def _extract_images_from_soup(soup, content_rule='', base_url=''):
+    """从 BeautifulSoup 中按内容规则或全部 img 提取图片 URL"""
+    if not soup:
+        return []
+    urls = []
+    # 优先按内容规则定位
+    if content_rule:
+        try:
+            sel = css_conv(content_rule.split('||')[0])
+            container = soup.select_one(sel)
+            if container:
+                for img in container.find_all('img'):
+                    u = img.get('data-src') or img.get('src') or img.get('data-original') or ''
+                    if u and not u.startswith('data:'):
+                        urls.append(u)
+        except Exception:
+            pass
+    # 兜底：全文 img
+    if not urls:
+        for img in soup.find_all('img'):
+            u = img.get('data-src') or img.get('src') or img.get('data-original') or ''
+            if u and not u.startswith('data:'):
+                urls.append(u)
+    out = []
+    for u in urls:
+        if u.startswith('//'):
+            u = 'https:' + u
+        elif not u.startswith('http'):
+            u = urljoin(base_url, u) if base_url else u
+        if u not in out:
+            out.append(u)
+    return out
+
+
+def _fetch_chapter_images(source, ch_url):
+    """漫画章节图片提取（统一入口）"""
+    from urllib.parse import urljoin as _uj
+    cr = source.content_r
+    content_rule = cr.get('content', '')
+
+    try:
+        if isinstance(source, CssSource):
+            url = _join_url(source.http_base, ch_url)
+            soup = source._fetch(url)
+            # 先尝试规则提取
+            return _extract_images_from_soup(soup, content_rule, url)
+        else:  # JsonApiSource / JsSource
+            # 先用文本路径取出原始内容（可能含 <img> 标签或纯 URL 列表）
+            text = _fetch_full_content(source, ch_url)
+            # 漫画 JSON 源常返回纯 URL 串（用 \n 或 , 分隔），尝试解析
+            if text:
+                # 优先尝试每行就是一个URL
+                line_urls = [line.strip() for line in text.split('\n') if line.strip().startswith('http')]
+                if len(line_urls) >= 2:
+                    return line_urls
+                # 否则按文本中嵌入的URL/img提取
+                return _extract_images_from_text(text, getattr(source, 'http_base', ''))
+            return []
+    except Exception:
+        return []
+
+
 # ════════════════════════════════════════════════════════════════
 # JSON API 源（纯 JSON 接口，最简单）
 # ════════════════════════════════════════════════════════════════
@@ -506,6 +869,8 @@ class JsonApiSource:
         self.bi_r = src.get('ruleBookInfo', {})
         self.sources_map = sources_map or {}
         self._headers = _parse_header(src.get('header', ''))
+        # Legado bookSourceType: 0=小说 1=听书 2=漫画 3=文件 4=影视
+        self.source_type = int(src.get('bookSourceType', 0) or 0)
         # 计算真实 HTTP base（有些源的 bookSourceUrl 是占位符非真实 URL）
         if self.base.startswith('http'):
             self.http_base = self.base
@@ -771,42 +1136,7 @@ class JsonApiSource:
         return result
 
     def chapter_content(self, ch_url):
-        # 处理 Legado 的 POST 请求格式：url,{"method":"POST","body":{...}}
-        post_body = None
-        extra_req_headers = {}
-        if ',{' in ch_url and '"method"' in ch_url:
-            idx = ch_url.index(',{')
-            url_part = ch_url[:idx]
-            try:
-                spec = json.loads(ch_url[idx + 1:])
-                if spec.get('method', 'GET').upper() == 'POST':
-                    post_body = spec.get('body', {})
-                extra_req_headers = spec.get('headers', {})
-            except (json.JSONDecodeError, Exception):
-                pass
-        else:
-            url_part = ch_url
-
-        url = _join_url(self.http_base, url_part)
-        req_headers = self._req_headers()
-        req_headers.update(extra_req_headers)
-        try:
-            if post_body is not None:
-                resp = http_requests.post(url, json=post_body, headers=req_headers, timeout=15)
-            else:
-                resp = http_requests.get(url, headers=req_headers, timeout=15)
-            data = safe_json(resp)
-            if data is None:
-                return '（无法解析章节内容）'
-        except Exception:
-            return '（获取章节失败）'
-        cr = self.content_r.get('content', '')
-        if cr:
-            # 使用 _resolve_rule 统一处理 <js>、@js:、{{}} 模板
-            val = _resolve_rule(cr, data, url)
-            if val:
-                return clean_text(val)
-        return clean_text(str(data))
+        return _fetch_full_content(self, ch_url)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -825,6 +1155,8 @@ class CssSource:
         self.bi_r = src.get('ruleBookInfo', {})
         self.sources_map = sources_map or {}
         self._headers = _parse_header(src.get('header', ''))
+        # Legado bookSourceType: 0=小说 1=听书 2=漫画 3=文件 4=影视
+        self.source_type = int(src.get('bookSourceType', 0) or 0)
         if self.base.startswith('http'):
             self.http_base = self.base
         else:
@@ -939,61 +1271,29 @@ class CssSource:
         return result
 
     def chapter_content(self, ch_url):
-        url = _join_url(self.http_base, ch_url)
-        try:
-            soup = self._fetch(url)
-        except Exception:
-            return '（获取章节失败）'
-        cr = self.content_r.get('content', '')
-        if not cr:
-            return '（无正文规则）'
-        # 带 <js> / @js: / {{}} 的规则走 _resolve_rule
-        if '<js>' in cr or '@js:' in cr or '{{' in cr:
-            val = _resolve_rule(cr, soup, url)
-            if val:
-                return clean_text(val)
-            return '（正文为空）'
-        # 纯 CSS 选择器
-        sel = css_conv(cr)
-        els = soup.select(sel)
-        if els:
-            paras = []
-            for el in els:
-                t = el.get_text(strip=True)
-                if t:
-                    paras.append(t)
-            return clean_text('\n'.join(paras)) if paras else '（正文为空）'
-        el = soup.select_one(sel)
-        if el:
-            return clean_text(el.get_text())
-        return '（未匹配到正文）'
+        text = _fetch_full_content(self, ch_url)
+        # 如果多页提取失败或只有错误信息，尝试回退选择器
+        if not text or text.startswith('（获取') or text.startswith('（无正文') or text.startswith('（未匹配'):
+            try:
+                soup = self._fetch(_join_url(self.http_base, ch_url))
+                fallback = _fallback_content(soup)
+                if fallback:
+                    return fallback
+            except Exception:
+                pass
+        return text
 
 
 # ════════════════════════════════════════════════════════════════
-# JS 源（通过 Node.js 子进程执行 @js: 规则）
+# JS 源（通过持久 Node.js 工作进程执行 @js: 规则）
 # ════════════════════════════════════════════════════════════════
-JS_RUNNER = str(Path(__file__).parent / 'js_runner.js')
 
 def run_js(code, key='', page=1, source_url='', headers=None, store=None):
-    """调用 Node.js 执行 JS 代码"""
-    params = json.dumps({
-        'code': code, 'key': key, 'page': page,
-        'sourceUrl': source_url,
-        'result': '',
-        'headers': headers or {},
-        'store': store or {},
-    }, ensure_ascii=False)
+    """调用持久 NodeWorker 执行 JS 代码（~5ms，替代原 subprocess ~200ms）"""
     try:
-        result = subprocess.run(
-            ['node', JS_RUNNER],
-            input=params, capture_output=True, text=True,
-            timeout=30, encoding='utf-8',
-        )
-        if result.returncode != 0:
-            return {'error': result.stderr or 'node exit code ' + str(result.returncode)}
-        return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        return {'error': 'JS 执行超时'}
+        return get_runtime().run_js(code, key=key, page=page,
+                                   source_url=source_url,
+                                   headers=headers, store=store)
     except Exception as e:
         return {'error': str(e)}
 
@@ -1012,6 +1312,8 @@ class JsSource:
         self.bi_r = src.get('ruleBookInfo', {})
         self.sources_map = sources_map or {}
         self._headers = _parse_header(src.get('header', ''))
+        # Legado bookSourceType: 0=小说 1=听书 2=漫画 3=文件 4=影视
+        self.source_type = int(src.get('bookSourceType', 0) or 0)
         self.store = {}  # 会话级存储
         # 计算真实 HTTP base
         if self.base.startswith('http'):
@@ -1205,21 +1507,7 @@ class JsSource:
         return result
 
     def chapter_content(self, ch_url):
-        url = _join_url(self.http_base, ch_url)
-        try:
-            resp = http_requests.get(url, headers=self._req_headers(), timeout=10)
-            data = safe_json(resp)
-            if data is None:
-                return '（无法解析章节内容）'
-        except Exception:
-            return '（获取章节失败）'
-        cr = self.content_r.get('content', '')
-        if cr:
-            # 使用 _resolve_rule 统一处理 <js>、@js:、{{}} 模板
-            val = _resolve_rule(cr, data, url)
-            if val:
-                return clean_text(val)
-        return clean_text(str(data))
+        return _fetch_full_content(self, ch_url)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1229,12 +1517,40 @@ class SourceManager:
     def __init__(self):
         self.sources = {}
         self.enabled = set()
-        self.health = {}  # url → {'ok': bool, 'latency': float, 'error': str}
+        self.health = {}  # url → {'status': 'ok'|'partial'|'dead', 'latency': float, 'error': str}
         self._health_running = False
+        self._status_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'source_status.json')
         self._load()
+        self._restore_health()
+
+    def _restore_health(self):
+        """启动时从 source_status.json 恢复健康数据"""
+        try:
+            if os.path.exists(self._status_file):
+                with open(self._status_file, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                restored = 0
+                for url, data in saved.items():
+                    if url in self.sources:
+                        self.health[url] = data
+                        restored += 1
+                if restored:
+                    ok = sum(1 for h in self.health.values() if h.get('status') == 'ok')
+                    dead = sum(1 for h in self.health.values() if h.get('status') == 'dead')
+                    print(f'📋 从文件恢复 {restored} 个源状态（{ok} ✓ / {dead} ✗）')
+        except Exception as e:
+            print(f'⚠ 恢复健康数据失败: {e}')
+
+    def _save_health(self):
+        """持久化健康数据到 source_status.json"""
+        try:
+            with open(self._status_file, 'w', encoding='utf-8') as f:
+                json.dump(self.health, f, ensure_ascii=False, indent=1)
+        except Exception as e:
+            print(f'⚠ 保存健康数据失败: {e}')
 
     def run_health_check(self):
-        """手动触发源健康检测（域名去重，独立 session）"""
+        """手动触发源健康检测（域名去重ping + 搜索测试，独立session，结果持久化）"""
         if self._health_running:
             return {'status': 'running'}
         self._health_running = True
@@ -1246,6 +1562,10 @@ class SourceManager:
         hs.verify = False
         hs.headers.update(session.headers)
         hs.timeout = 3
+
+        # 测试关键词（小说、漫画常用中文搜索词）
+        test_keywords = ['玄幻', '系统', '穿越', '都市', '仙侠', '重生']
+        import random
 
         targets = list(self.sources.values())
 
@@ -1275,10 +1595,21 @@ class SourceManager:
                 except Exception:
                     return (domain, False, 0)
 
+        def _test_search(src):
+            """对单个源执行真实搜索测试，返回是否有结果"""
+            kw = random.choice(test_keywords)
+            try:
+                results = src.search(kw, 1)
+                return len(results) > 0
+            except Exception:
+                return False
+
         def _run():
             from concurrent.futures import ThreadPoolExecutor, as_completed
             healthy_domains = set()
-            print(f'🔍 健康检测 {len(domains)} 个唯一域名...')
+
+            # 阶段1：域名 ping
+            print(f'🔍 阶段1: 检测 {len(domains)} 个唯一域名...')
             with ThreadPoolExecutor(max_workers=30) as pool:
                 futs = [pool.submit(_ping, d, u) for d, u in domains.items()]
                 try:
@@ -1292,22 +1623,65 @@ class SourceManager:
                 except Exception:
                     pass
 
-            # 映射回源
+            # 映射回源 → 初始状态（域名通→partial，不通→dead）
+            domain_status = {}  # src.base → 'partial'|'dead'
             ok_count = 0
             for src in targets:
                 hb = getattr(src, 'http_base', src.base)
                 if hb.startswith('http'):
                     try:
                         d = urlparse(hb).netloc
-                        is_ok = d in healthy_domains
-                        self.health[src.base] = {'ok': is_ok, 'latency': 0, 'error': '' if is_ok else '不可达'}
-                        if is_ok:
+                        if d in healthy_domains:
+                            domain_status[src.base] = 'partial'
                             ok_count += 1
+                        else:
+                            domain_status[src.base] = 'dead'
                     except Exception:
-                        self.health[src.base] = {'ok': False, 'latency': 0, 'error': '无效地址'}
+                        domain_status[src.base] = 'dead'
                 else:
-                    self.health[src.base] = {'ok': False, 'latency': 0, 'error': '无HTTP地址'}
-            print(f'🔍 健康检测完成: {ok_count}/{len(targets)} 个源可达')
+                    domain_status[src.base] = 'dead'
+            print(f'🔍 阶段1完成: {ok_count}/{len(targets)} 个源可达')
+
+            # 阶段2：对可达的源做搜索测试（限 sampled 个，避免太慢）
+            reachable = [src for src in targets if domain_status.get(src.base) == 'partial' and src.base in self.enabled]
+            import random as _random
+            _random.shuffle(reachable)
+            sample_size = min(60, len(reachable))
+            test_sample = reachable[:sample_size] if sample_size > 0 else []
+            search_ok = set()
+            if test_sample:
+                print(f'🔍 阶段2: 对 {len(test_sample)} 个源做搜索测试...')
+                with ThreadPoolExecutor(max_workers=10) as pool:
+                    futs = {pool.submit(_test_search, src): src for src in test_sample}
+                    try:
+                        for fut in as_completed(futs, timeout=30):
+                            src = futs[fut]
+                            try:
+                                if fut.result():
+                                    search_ok.add(src.base)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                print(f'🔍 阶段2完成: {len(search_ok)}/{len(test_sample)} 个源搜索有结果')
+
+            # 最终状态判定
+            for src in targets:
+                if src.base in search_ok:
+                    self.health[src.base] = {'status': 'ok', 'latency': 0, 'error': '', 'tested': True}
+                elif domain_status.get(src.base) == 'partial':
+                    self.health[src.base] = {'status': 'partial', 'latency': 0, 'error': '域名可达，搜索测试未覆盖或无结果', 'tested': src.base in {s.base for s in test_sample}}
+                else:
+                    self.health[src.base] = {'status': 'dead', 'latency': 0, 'error': '域名不可达', 'tested': True}
+
+            # 持久化
+            self._save_health()
+
+            status_counts = {'ok': 0, 'partial': 0, 'dead': 0}
+            for h in self.health.values():
+                s = h.get('status', 'dead')
+                status_counts[s] = status_counts.get(s, 0) + 1
+            print(f'🔍 健康检测完成: {status_counts["ok"]}✓ / {status_counts["partial"]}~ / {status_counts["dead"]}✗（已保存）')
             self._health_running = False
 
         threading.Thread(target=_run, daemon=True).start()
@@ -1333,6 +1707,8 @@ class SourceManager:
             if url and (search_url or has_rules):
                 all_src[url] = s
         json_count, css_count, js_count = 0, 0, 0
+        # 按 bookSourceType 索引（0=小说 1=听书 2=漫画 3=文件 4=影视）
+        self.type_index = {0: [], 1: [], 2: [], 3: [], 4: []}
         for url, s in all_src.items():
             bl = s.get('ruleSearch', {}).get('bookList', '')
             search_url = s.get('searchUrl', '').strip()
@@ -1352,10 +1728,23 @@ class SourceManager:
                     css_count += 1
             self.sources[url] = src
             self.enabled.add(url)
+            stype = getattr(src, 'source_type', 0)
+            if stype not in self.type_index:
+                self.type_index[stype] = []
+            self.type_index[stype].append(url)
+        type_stats = ' | '.join(f'{["小说","听书","漫画","文件","影视"][t] if t<5 else f"类型{t}"}:{len(self.type_index[t])}'
+                                 for t in sorted(self.type_index) if self.type_index[t])
         print(f'✓ 已加载 {len(self.sources)} 个源（JSON API: {json_count}, CSS: {css_count}, JS: {js_count}）')
+        print(f'  分类: {type_stats}')
 
-    def search(self, kw, page=1, source_filter=None, max_workers=30, max_sources=20, search_timeout=4):
-        targets = [self.sources[u] for u in self.enabled if u in self.sources]
+    def search(self, kw, page=1, source_filter=None, source_type=None,
+               max_workers=30, max_sources=20, search_timeout=4):
+        # 类型过滤：仅在指定类型时启用
+        if source_type is not None:
+            type_urls = set(self.type_index.get(source_type, []))
+            targets = [self.sources[u] for u in self.enabled if u in self.sources and u in type_urls]
+        else:
+            targets = [self.sources[u] for u in self.enabled if u in self.sources]
         if source_filter:
             targets = [s for s in targets if source_filter in s.name or source_filter in s.base]
 
@@ -1437,17 +1826,27 @@ def index():
 
 @app.route('/api/sources')
 def api_sources():
+    type_labels = {0: '小说', 1: '听书', 2: '漫画', 3: '文件', 4: '影视'}
     sources = []
     for url, src in mgr.sources.items():
         h = mgr.health.get(url, {})
+        stype = getattr(src, 'source_type', 0)
+        status = h.get('status')
+        if status is None:
+            # 兼容旧格式
+            status = 'ok' if h.get('ok') else ('dead' if h.get('ok') is False else None)
         sources.append({
             'url': url,
             'name': src.name,
             'group': src.group,
             'enabled': url in mgr.enabled,
             'type': 'js' if isinstance(src, JsSource) else ('json' if isinstance(src, JsonApiSource) else 'css'),
+            'source_type': stype,
+            'category': type_labels.get(stype, f'类型{stype}'),
             'healthy': h.get('ok'),
+            'status': status,          # 'ok' | 'partial' | 'dead' | null(未检测)
             'latency': h.get('latency', 0),
+            'tested': h.get('tested', False),
         })
     return jsonify(sources)
 
@@ -1472,8 +1871,16 @@ def api_search():
         return jsonify([])
     page = int(request.args.get('page', 1))
     src_filter = request.args.get('source', '')
+    # 按类型过滤：?type=0(小说) / 1(听书) / 2(漫画) / 4(影视)
+    stype_raw = request.args.get('type', '')
+    source_type = None
+    if stype_raw != '':
+        try:
+            source_type = int(stype_raw)
+        except (ValueError, TypeError):
+            source_type = None
     try:
-        results = mgr.search(kw, page, src_filter or None)
+        results = mgr.search(kw, page, src_filter or None, source_type=source_type)
         return jsonify(results)
     except Exception as e:
         import traceback
@@ -1495,6 +1902,7 @@ def api_detail():
     book = src.detail(book_url, search_data)
     book['source_url'] = source_url
     book['book_url'] = book_url
+    book['source_type'] = getattr(src, 'source_type', 0)
     return jsonify(book)
 
 @app.route('/api/chapter')
@@ -1504,8 +1912,59 @@ def api_chapter():
     src = mgr.get_source(source_url)
     if not src:
         return jsonify(error='源未找到'), 404
+    stype = getattr(src, 'source_type', 0)
+    # 漫画：返回图片列表
+    if stype == 2:
+        imgs = _fetch_chapter_images(src, ch_url)
+        return jsonify(content_type='comic', images=imgs,
+                       source_url=source_url, count=len(imgs))
+    # 听书：尝试提取音频URL
+    if stype == 1:
+        text = src.chapter_content(ch_url)
+        audio_url = ''
+        if text:
+            m = re.search(r'https?://[^\s"\'<>]+\.(?:mp3|m4a|aac|ogg|flac|wav)(?:\?[^\s"\'<>]*)?', text, re.IGNORECASE)
+            if m:
+                audio_url = m.group(0)
+        return jsonify(content_type='audio', audio_url=audio_url,
+                       content=text, source_url=source_url)
+    # 默认：文本
     content = src.chapter_content(ch_url)
-    return jsonify(content=content)
+    return jsonify(content_type='text', content=content)
+
+
+@app.route('/api/proxy')
+def api_proxy():
+    """图片/资源代理 —— 伪造 Referer 绕过防盗链，屏蔽私有 IP 防 SSRF"""
+    url = request.args.get('url', '')
+    if not url or not url.startswith('http'):
+        return 'Invalid URL', 400
+
+    # SSRF 防护：屏蔽私有 IP
+    try:
+        hostname = urlparse(url).hostname
+        if hostname:
+            ip = socket.gethostbyname(hostname)
+            if ipaddress.ip_address(ip).is_private:
+                return 'Blocked: private IP', 403
+    except Exception:
+        pass
+
+    referer = request.args.get('referer', '') or request.args.get('source', '') or url
+    headers = {
+        'Referer': referer,
+        'User-Agent': session.headers.get('User-Agent', ''),
+        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+    }
+    try:
+        resp = session.get(url, headers=headers, timeout=10, stream=True, verify=False)
+        content_type = resp.headers.get('Content-Type', 'image/jpeg')
+        data = resp.content[:5 * 1024 * 1024]  # 5MB 上限
+        return Response(data, content_type=content_type,
+                        headers={'Cache-Control': 'public, max-age=3600',
+                                 'Access-Control-Allow-Origin': '*'})
+    except Exception as e:
+        return f'Fetch failed: {e}', 502
 
 @app.route('/api/shelf')
 def api_shelf_list():

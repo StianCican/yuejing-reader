@@ -67,6 +67,13 @@
 
       <!-- Search Results -->
       <div id="searchView" class="view">
+        <div class="type-tabs" id="typeTabs">
+          <button class="type-tab active" data-type="" onclick="setSearchType('', event)">全部</button>
+          <button class="type-tab" data-type="0" onclick="setSearchType('0', event)">📖 小说</button>
+          <button class="type-tab" data-type="2" onclick="setSearchType('2', event)">🎨 漫画</button>
+          <button class="type-tab" data-type="1" onclick="setSearchType('1', event)">🎧 听书</button>
+          <button class="type-tab" data-type="4" onclick="setSearchType('4', event)">🎬 影视</button>
+        </div>
         <div class="section-title">搜索结果 <span class="count" id="resultCount"></span></div>
         <div id="searchResults" class="book-grid"></div>
       </div>
@@ -136,6 +143,7 @@
 <!-- Scripts: order matters — app defines globals, others extend them -->
 <script src="/static/js/app.js"></script>
 <script src="/static/js/reader.js"></script>
+<script src="/static/js/comic_reader.js"></script>
 <script src="/static/js/shelf.js"></script>
 <script src="/static/js/settings.js"></script>
 </body>

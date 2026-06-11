@@ -107,6 +107,79 @@
 .chapter-item.read{color:var(--muted);background:var(--surface2)}
 .chapter-item.current{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:600}
 
+/* ── 漫画阅读器 ── */
+.comic-reader {
+  display:flex;flex-direction:column;align-items:center;
+  padding:24px 0;gap:32px;background:var(--bg)
+}
+.comic-page {
+  display:flex;flex-direction:column;align-items:center;
+  width:100%;max-width:900px
+}
+.comic-page-num {
+  font-size:13px;color:var(--muted);margin-bottom:12px;
+  font-family:var(--font-serif)
+}
+.comic-img-wrap {
+  position:relative;width:100%;min-height:200px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);overflow:hidden;
+  display:flex;align-items:center;justify-content:center
+}
+.comic-img-wrap .comic-placeholder {
+  position:absolute;font-size:32px;color:var(--muted);
+  pointer-events:none
+}
+.comic-img {
+  width:100%;display:block;opacity:0;transition:opacity .4s;
+  position:relative;z-index:1
+}
+.comic-img.loaded { opacity:1; }
+.comic-empty {
+  text-align:center;padding:80px 24px;color:var(--muted)
+}
+.comic-empty span { font-size:48px;display:block;margin-bottom:16px }
+.comic-empty p { font-size:16px }
+
+/* ── 音频播放器 ── */
+.audio-reader {
+  max-width:700px;margin:0 auto;padding:32px 0
+}
+.audio-player {
+  display:flex;flex-direction:column;align-items:center;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:48px 32px 32px;
+  text-align:center;gap:16px
+}
+.audio-player .audio-cover {
+  width:120px;height:120px;border-radius:50%;
+  background:var(--surface3);display:flex;align-items:center;
+  justify-content:center;font-size:52px;
+  border:2px solid var(--border)
+}
+.audio-player .audio-info .audio-title {
+  font-size:20px;font-weight:600;font-family:var(--font-serif);
+  margin-bottom:4px
+}
+.audio-player .audio-info .audio-sub {
+  font-size:13px;color:var(--muted)
+}
+.audio-player .audio-ctrl {
+  width:100%;max-width:500px;margin-top:8px;
+  border-radius:var(--radius);background:var(--surface3)
+}
+.audio-player .audio-no-src {
+  padding:24px;color:var(--amber);font-size:15px
+}
+.audio-text-wrap {
+  margin-top:24px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px
+}
+.audio-text-wrap summary {
+  cursor:pointer;font-size:14px;color:var(--accent);
+  font-family:var(--font-serif)
+}
+
 /* ── 响应式 ── */
 @media(max-width:768px){
   .reader-wrap{padding:20px 0}

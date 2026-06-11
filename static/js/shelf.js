@@ -24,7 +24,7 @@ function renderShelf() {
     const idx = readingProgress[bk];
     const progressText = idx !== undefined ? `<div class="progress-badge">已读 ${idx+1} 章</div>` : '';
     return `<div class="shelf-item" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
-      <div class="cover">${b.cover ? `<img src="${esc(b.cover)}" onerror="this.parentElement.innerHTML='📕'">` : '📕'}</div>
+      <div class="cover">${b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕'}</div>
       <div class="info">
         <div class="name">${esc(b.name)}</div>
         <div class="author">${esc(b.author||'')}</div>
