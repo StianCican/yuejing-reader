@@ -21,8 +21,18 @@ function renderShelf() {
   }
   el.innerHTML = '<h3>我的书架</h3>' + shelf.map(b => {
     const bk = getBookKey(b);
-    const idx = readingProgress[bk];
-    const progressText = idx !== undefined ? `<div class="progress-badge">已读 ${idx+1} 章</div>` : '';
+    const progress = readingProgress[bk];
+    let progressText = '';
+    if (progress !== undefined) {
+      const ch = typeof progress === 'object' ? progress.chapter : progress;
+      const total = typeof progress === 'object' ? progress.total : null;
+      if (total && total > 0) {
+        const pct = Math.round((ch + 1) / total * 100);
+        progressText = `<div class="progress-badge">📖 ${pct}%（${ch+1}/${total}章）</div>`;
+      } else {
+        progressText = `<div class="progress-badge">已读 ${ch+1} 章</div>`;
+      }
+    }
     return `<div class="shelf-item" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
       <div class="cover">${b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕'}</div>
       <div class="info">

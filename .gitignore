@@ -4,6 +4,8 @@ __pycache__/
 .vscode/
 .idea/
 *.tmp
+yuejing*.txt
 node_modules/
 .claude/
-__pycache__/
+test_results.json
+source_status.json

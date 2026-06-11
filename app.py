@@ -17,7 +17,9 @@ from urllib.parse import urljoin, quote, urlencode, urlparse
 from flask import Flask, request, jsonify, render_template, Response
 import requests as http_requests
 from bs4 import BeautifulSoup
-import socket, ipaddress
+import socket, ipaddress, warnings
+# 抑制 BeautifulSoup XML 解析警告
+warnings.filterwarnings('ignore', category=UserWarning, module='bs4')
 
 
 def _join_url(base, path):
@@ -1121,12 +1123,25 @@ class JsonApiSource:
                 return []
         if soup is None:
             return []
-        cl_sel = css_conv(self.toc_r.get('chapterList', ''))
+        cl_sel_raw = self.toc_r.get('chapterList', '')
         cn_sel = self.toc_r.get('chapterName', '')
         cu_sel = self.toc_r.get('chapterUrl', '')
-        if not cl_sel or not cn_sel:
+        if not cl_sel_raw or not cn_sel:
             return []
-        items = soup.select(cl_sel)
+        # || 回退：多个 CSS 选择器依次尝试
+        items = []
+        for cl_part in cl_sel_raw.split('||'):
+            cl_part = cl_part.strip()
+            if not cl_part:
+                continue
+            try:
+                cl_sel = css_conv(cl_part)
+                if cl_sel:
+                    items = soup.select(cl_sel)
+                    if items:
+                        break
+            except Exception:
+                continue
         result = []
         for i, item in enumerate(items):
             name = extract_val(item, cn_sel) or f'第{i+1}章'
@@ -1256,12 +1271,25 @@ class CssSource:
                 return []
         if soup is None:
             return []
-        cl_sel = css_conv(self.toc_r.get('chapterList', ''))
+        cl_sel_raw = self.toc_r.get('chapterList', '')
         cn_sel = self.toc_r.get('chapterName', '')
         cu_sel = self.toc_r.get('chapterUrl', '')
-        if not cl_sel or not cn_sel:
+        if not cl_sel_raw or not cn_sel:
             return []
-        items = soup.select(cl_sel)
+        # || 回退：多个 CSS 选择器依次尝试
+        items = []
+        for cl_part in cl_sel_raw.split('||'):
+            cl_part = cl_part.strip()
+            if not cl_part:
+                continue
+            try:
+                cl_sel = css_conv(cl_part)
+                if cl_sel:
+                    items = soup.select(cl_sel)
+                    if items:
+                        break
+            except Exception:
+                continue
         result = []
         for i, item in enumerate(items):
             name = extract_val(item, cn_sel) or f'第{i+1}章'
@@ -1520,6 +1548,9 @@ class SourceManager:
         self.health = {}  # url → {'status': 'ok'|'partial'|'dead', 'latency': float, 'error': str}
         self._health_running = False
         self._status_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'source_status.json')
+        self._fail_count = {}  # 失败计数，用于自动降权
+        self._search_cache = {}  # key → (timestamp, results)
+        self._cache_ttl = 300  # 5 分钟缓存
         self._load()
         self._restore_health()
 
@@ -1738,22 +1769,49 @@ class SourceManager:
         print(f'  分类: {type_stats}')
 
     def search(self, kw, page=1, source_filter=None, source_type=None,
-               max_workers=30, max_sources=20, search_timeout=4):
+               max_workers=40, max_sources=20, search_timeout=5):
+        # ── 缓存检查 ──
+        import time as _time
+        cache_key = f'{kw}|{page}|{source_type}|{source_filter}'
+        cached = self._search_cache.get(cache_key)
+        if cached and _time.time() - cached[0] < self._cache_ttl:
+            print(f'[search] cache hit for "{kw}" ({len(cached[1])} results)')
+            return cached[1]
+
         # 类型过滤：仅在指定类型时启用
         if source_type is not None:
             type_urls = set(self.type_index.get(source_type, []))
             targets = [self.sources[u] for u in self.enabled if u in self.sources and u in type_urls]
         else:
             targets = [self.sources[u] for u in self.enabled if u in self.sources]
+
         if source_filter:
             targets = [s for s in targets if source_filter in s.name or source_filter in s.base]
 
-        # ── 智能分层：JSON优先 + JS次之 + CSS兜底 ──
+        # 过滤已知失效源
+        dead_urls = {url for url, h in self.health.items() if h.get('status') == 'dead'}
+        live = [s for s in targets if s.base not in dead_urls]
+        # 如果过滤后不够，还是用全部（避免全死的情况）
+        if len(live) >= 10:
+            targets = live
+
+        # ── 智能分层：健康优先 + 各类型限流 ──
         json_targets = [s for s in targets if isinstance(s, JsonApiSource)]
         js_targets   = [s for s in targets if isinstance(s, JsSource)]
         css_targets  = [s for s in targets if isinstance(s, CssSource)]
-        tiered = json_targets + js_targets[:30] + css_targets[:20]
-        tiered = tiered[:120]  # 硬上限 120 个源
+
+        # 健康源优先排序
+        ok_urls = {url for url, h in self.health.items() if h.get('status') == 'ok'}
+        def _sort_key(src):
+            s = self.health.get(src.base, {}).get('status')
+            return 2 if s == 'ok' else (1 if s is None else 0)
+
+        json_targets.sort(key=_sort_key, reverse=True)
+        js_targets.sort(key=_sort_key, reverse=True)
+        css_targets.sort(key=_sort_key, reverse=True)
+
+        # 不再硬上限：全量参与搜索，靠并发+早返机制控制延迟（dead源已过滤）
+        tiered = json_targets + js_targets + css_targets
 
         all_results = []
         seen = set()  # 去重：书名+作者
@@ -1765,19 +1823,31 @@ class SourceManager:
 
         def _do(src):
             try:
-                return src.search(kw, page)
+                results = src.search(kw, page)
+                st = getattr(src, 'source_type', 0)
+                for r in results:
+                    r['source_type'] = st
+                # 成功：重置失败计数
+                if results:
+                    self._fail_count[src.base] = 0
+                return results
             except Exception:
+                # 失败：计数+1，连续失败 ≥3 次标记为 dead
+                self._fail_count[src.base] = self._fail_count.get(src.base, 0) + 1
+                if self._fail_count[src.base] >= 3:
+                    self.health[src.base] = {'status': 'dead', 'latency': 0, 'error': '连续搜索失败', 'tested': True}
                 return []
 
         pool = ThreadPoolExecutor(max_workers=max_workers)
         futs = [pool.submit(_do, s) for s in tiered]
         from concurrent.futures import as_completed
         import time as _time
-        deadline = _time.time() + search_timeout + 4  # 给 +4s 缓冲
-        early_deadline = _time.time() + 3  # 3秒内有 ≥10 条就提前返回
+        deadline = _time.time() + search_timeout + 6  # 总超时 +6s 缓冲
+        min_search = _time.time() + 1.5  # 最低搜索 1.5s，给慢源（CSS/JS）响应时间
+        early_deadline = _time.time() + 3  # 3s 内有 ≥10 条就提前返回
 
         try:
-            for fut in as_completed(futs, timeout=search_timeout + 6):
+            for fut in as_completed(futs, timeout=search_timeout + 10):
                 try:
                     results = fut.result()
                     for r in results:
@@ -1788,14 +1858,51 @@ class SourceManager:
                 except Exception:
                     pass
                 now = _time.time()
-                # 3s 内有 ≥10 条即返回；总超时或 ≥30 条也返回
-                if len(all_results) >= 30 or (now >= deadline):
+                # 总超时；≥30条且过了最低搜索时间
+                if now >= deadline:
+                    break
+                if len(all_results) >= 30 and now >= min_search:
                     break
                 if len(all_results) >= 10 and now >= early_deadline:
                     break
         except TimeoutError:
             pass
         pool.shutdown(wait=False)
+
+        # ── 结果排序：精确名次匹配 + 健康优先 ──
+        if all_results:
+            kw_lower = kw.strip().lower()
+            def _result_rank(r):
+                score = 0
+                name = r.get('name', '')
+                # 1. 书名精确匹配关键词 (最高权重)
+                if name.strip() == kw.strip():
+                    score += 1000
+                elif kw_lower in name.lower():
+                    score += 500
+                # 2. 源健康状态
+                h = self.health.get(r.get('source_url', ''), {})
+                hs = h.get('status')
+                if hs == 'ok':
+                    score += 200
+                elif hs is None:
+                    score += 100
+                # 3. 小说类型优先（无筛选时）
+                if source_type is None:
+                    src = self.sources.get(r.get('source_url', ''))
+                    if src and getattr(src, 'source_type', 0) == 0:
+                        score += 50
+                return -score  # 负值用于升序
+            all_results.sort(key=_result_rank)
+            all_results = all_results[:100]  # 截断，只返回前 100 条排序结果
+
+        # ── 写入缓存 ──
+        self._search_cache[cache_key] = (_time.time(), all_results)
+        # 清理过期缓存
+        if len(self._search_cache) > 200:
+            now = _time.time()
+            self._search_cache = {k: v for k, v in self._search_cache.items() if now - v[0] < self._cache_ttl}
+
         print(f'[search] results={len(all_results)}, deduped, sources_scanned={len(tiered)}')
         return all_results
 

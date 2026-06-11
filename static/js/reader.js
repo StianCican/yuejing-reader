@@ -47,10 +47,12 @@ async function readChapter(idx) {
     }
     showView('reader');
     document.getElementById('content').scrollTop = 0;
-    // 保存阅读进度
+    // 保存阅读进度（含总章节数）
     if (currentBook) {
       const bk = getBookKey(currentBook);
-      saveProgress(bk, idx);
+      saveProgress(bk, idx, chapters.length);
+      // 恢复滚动位置
+      restoreScrollPos(bk);
     }
     // 阅读模式：隐藏侧边栏
     if (window.innerWidth <= 768) {
@@ -97,6 +99,8 @@ function renderAudioPlayer(audioUrl, fallbackText, title) {
 }
 
 function navChapter(dir) {
+  // 保存当前章滚动位置
+  if (currentBook) saveScrollPos(getBookKey(currentBook));
   readChapter(currentChapterIdx + dir);
 }
 
@@ -108,7 +112,10 @@ document.addEventListener('keydown', (e) => {
   switch (e.key) {
     case 'ArrowLeft':  navChapter(-1); break;
     case 'ArrowRight': navChapter(1);  break;
-    case 'Escape':     showDetail();   break;
+    case 'Escape':
+      if (currentBook) saveScrollPos(getBookKey(currentBook));
+      showDetail();
+      break;
     case 't':          cycleTheme();   break;
     // 漫画模式：上下翻页
     case 'ArrowDown':  comicScrollPage(1);  break;

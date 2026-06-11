@@ -29,9 +29,32 @@ function getBookKey(b) {
 function loadProgress() {
   try { readingProgress = JSON.parse(S.getItem('readingProgress') || '{}'); } catch(e) { readingProgress = {}; }
 }
-function saveProgress(bookKey, chapterIdx) {
-  readingProgress[bookKey] = chapterIdx;
+function saveProgress(bookKey, chapterIdx, totalChapters) {
+  readingProgress[bookKey] = totalChapters ? { chapter: chapterIdx, total: totalChapters } : chapterIdx;
   S.setItem('readingProgress', JSON.stringify(readingProgress));
+}
+
+// ── 滚动位置 ──
+function saveScrollPos(bookKey) {
+  const el = document.getElementById('content');
+  if (el) {
+    try {
+      const pos = { scrollTop: el.scrollTop, timestamp: Date.now() };
+      S.setItem('scrollPos_' + bookKey, JSON.stringify(pos));
+    } catch(e) {}
+  }
+}
+function restoreScrollPos(bookKey) {
+  try {
+    const raw = S.getItem('scrollPos_' + bookKey);
+    if (raw) {
+      const pos = JSON.parse(raw);
+      if (Date.now() - pos.timestamp < 86400000) { // 24h 内有效
+        const el = document.getElementById('content');
+        if (el) el.scrollTop = pos.scrollTop;
+      }
+    }
+  } catch(e) {}
 }
 
 // ── Init ──
@@ -136,8 +159,10 @@ function renderSearchResults(results) {
 }
 
 function bookCard(b, i) {
+  const typeLabels = {0: '📖 小说', 1: '🎧 听书', 2: '🎨 漫画', 3: '📁 文件', 4: '🎬 影视'};
+  const typeBadge = b.source_type != null ? `<span class="type-badge">${typeLabels[b.source_type] || ''}</span>` : '';
   const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
-  const sourceHtml = b.source_name ? `<div class="source"><span class="dot"></span>${esc(b.source_name)}</div>` : '';
+  const sourceHtml = b.source_name ? `<div class="source"><span class="dot"></span>${esc(b.source_name)}${typeBadge}</div>` : '';
   return `<div class="book-card" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
     <div class="cover"><div class="placeholder">${cover}</div></div>
     <div class="meta">
@@ -240,7 +265,16 @@ function renderSources() {
     if (!groups[g]) groups[g] = [];
     groups[g].push(s);
   });
-  let html = `<button class="btn btn-outline" style="width:100%;margin-bottom:12px" onclick="runHealthCheck()">🔍 检测源可用性</button>`;
+  let html = `
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input type="text" id="sourceFilterInput" placeholder="🔍 筛选源..."
+        style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"
+        oninput="filterSources()">
+      <button class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="runHealthCheck()" title="检测源可用性">🔍 检测</button>
+    </div>`;
+  if (deadCount > 0) {
+    html += `<button class="btn btn-outline" style="width:100%;margin-bottom:12px;color:var(--red);border-color:var(--red);font-size:12px" onclick="batchDisableDead()">⚠️ 一键禁用 ${deadCount} 个失效源</button>`;
+  }
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
     html += list.map(s => {
@@ -286,7 +320,48 @@ async function toggleSource(url) {
       body: JSON.stringify({url})
     });
     await loadSources();
+    filterSources(); // 保持筛选状态
   } catch (e) { toast('操作失败'); }
+}
+
+// ── 源筛选 ──
+function filterSources() {
+  const q = (document.getElementById('sourceFilterInput')?.value || '').toLowerCase();
+  document.querySelectorAll('#sourcesPanel .source-item').forEach(el => {
+    const name = (el.querySelector('.name')?.textContent || '').toLowerCase();
+    el.style.display = (!q || name.includes(q)) ? '' : 'none';
+  });
+  // 隐藏空分组标题
+  document.querySelectorAll('#sourcesPanel h3').forEach(h3 => {
+    const group = h3.nextElementSibling;
+    let hasVisible = false;
+    let sibling = h3.nextElementSibling;
+    while (sibling && sibling.tagName !== 'H3') {
+      if (sibling.style.display !== 'none') { hasVisible = true; break; }
+      sibling = sibling.nextElementSibling;
+    }
+    h3.style.display = hasVisible ? '' : 'none';
+  });
+}
+
+// ── 批量禁用失效源 ──
+async function batchDisableDead() {
+  const deadSources = sources.filter(s => s.status === 'dead' && s.enabled);
+  if (!deadSources.length) { toast('没有可禁用的失效源'); return; }
+  if (!confirm(`确定要禁用 ${deadSources.length} 个失效源吗？`)) return;
+  let count = 0;
+  for (const s of deadSources) {
+    try {
+      await fetch('/api/toggle_source', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({url: s.url})
+      });
+      count++;
+    } catch(e) {}
+  }
+  await loadSources();
+  filterSources();
+  toast(`✅ 已禁用 ${count} 个失效源`);
 }
 
 // ── Utils ──
