@@ -7,10 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@300;400;500;700&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/base.css">
-<link rel="stylesheet" href="/static/css/components.css">
-<link rel="stylesheet" href="/static/css/reader.css">
-<link rel="stylesheet" href="/static/css/home.css">
+<link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
 <div class="app">
@@ -71,8 +68,6 @@
           <button class="type-tab active" data-type="" onclick="setSearchType('', event)">全部</button>
           <button class="type-tab" data-type="0" onclick="setSearchType('0', event)">📖 小说</button>
           <button class="type-tab" data-type="2" onclick="setSearchType('2', event)">🎨 漫画</button>
-          <button class="type-tab" data-type="1" onclick="setSearchType('1', event)">🎧 听书</button>
-          <button class="type-tab" data-type="4" onclick="setSearchType('4', event)">🎬 影视</button>
         </div>
         <div class="section-title">搜索结果 <span class="count" id="resultCount"></span></div>
         <div id="searchResults" class="book-grid"></div>
@@ -97,8 +92,9 @@
           </div>
           <div class="reader-content" id="readerContent"></div>
           <div class="reader-bottom">
+            <button class="btn btn-outline" id="prevChapterBottom" onclick="navChapter(-1)">← 上一章</button>
             <button class="btn btn-outline" onclick="showDetail()">📑 返回目录</button>
-            <button class="btn btn-outline" onclick="openSettings()">⚙ 阅读设置</button>
+            <button class="btn btn-outline" id="nextChapterBottom" onclick="navChapter(1)">下一章 →</button>
           </div>
         </div>
       </div>

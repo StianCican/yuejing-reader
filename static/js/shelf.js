@@ -6,22 +6,22 @@
 async function loadShelf() {
   try {
     const resp = await fetch('/api/shelf');
-    shelf = await resp.json();
+    State.shelf = await resp.json();
     renderShelf();
     renderHomeShelf();
-  } catch (e) { shelf = []; }
+  } catch (e) { State.shelf = []; }
 }
 
 // ── 侧边栏书架 ──
 function renderShelf() {
   const el = document.getElementById('shelfPanel');
-  if (!shelf.length) {
+  if (!State.shelf.length) {
     el.innerHTML = '<div class="empty" style="padding:20px"><p>书架空空如也</p></div>';
     return;
   }
-  el.innerHTML = '<h3>我的书架</h3>' + shelf.map(b => {
+  el.innerHTML = '<h3>我的书架</h3>' + State.shelf.map(b => {
     const bk = getBookKey(b);
-    const progress = readingProgress[bk];
+    const progress = State.readingProgress[bk];
     let progressText = '';
     if (progress !== undefined) {
       const ch = typeof progress === 'object' ? progress.chapter : progress;
@@ -47,20 +47,20 @@ function renderShelf() {
 // ── 首页书架 ──
 function renderHomeShelf() {
   const el = document.getElementById('homeShelf');
-  if (!shelf.length) {
+  if (!State.shelf.length) {
     el.innerHTML = '<div class="empty"><div class="icon">📖</div><p>还没有收藏，搜索一本书试试</p></div>';
     return;
   }
-  el.innerHTML = shelf.map((b, i) => bookCard(b, i)).join('');
+  el.innerHTML = State.shelf.map((b, i) => bookCard(b, i)).join('');
 }
 
 // ── 收藏/取消 ──
 async function toggleShelf() {
-  if (!currentBook) return;
+  if (!State.currentBook) return;
   try {
     const resp = await fetch('/api/shelf', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(currentBook)
+      body: JSON.stringify(State.currentBook)
     });
     const data = await resp.json();
     await loadShelf();

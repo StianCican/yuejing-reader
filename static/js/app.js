@@ -1,21 +1,24 @@
 /* ════════════════════════════════════════════════════════════════
-   app.js — 全局状态、导航、搜索、详情、书源管理
+   app.js — 全局状态、导航、搜索、详情、源管理
    ════════════════════════════════════════════════════════════════ */
 
-// ── State ──
-let currentView = 'home';
-let currentBook = null;
-let chapters = [];
-let currentChapterIdx = -1;
-let shelf = [];
-let sources = [];
-let readingProgress = {}; // { bookKey: chapterIdx }
+// ── 集中状态 ──
 const S = localStorage;
+const State = {
+  currentView: 'home',
+  currentBook: null,
+  chapters: [],
+  currentChapterIdx: -1,
+  shelf: [],
+  sources: [],
+  readingProgress: {},
+  searchResults: [],   // 搜索结果缓存（供事件委托使用）
+  currentSearchType: '',
+};
 
 // ── 图片代理 ──
 function proxyUrl(url, referer) {
   if (!url || !url.startsWith('http')) return url;
-  // 本地/相对路径无需代理
   if (url.startsWith('/') || url.startsWith(window.location.origin)) return url;
   let proxy = '/api/proxy?url=' + encodeURIComponent(url);
   if (referer) proxy += '&referer=' + encodeURIComponent(referer);
@@ -27,11 +30,11 @@ function getBookKey(b) {
   return b.source_url + '|' + b.book_url;
 }
 function loadProgress() {
-  try { readingProgress = JSON.parse(S.getItem('readingProgress') || '{}'); } catch(e) { readingProgress = {}; }
+  try { State.readingProgress = JSON.parse(S.getItem('readingProgress') || '{}'); } catch(e) { State.readingProgress = {}; }
 }
 function saveProgress(bookKey, chapterIdx, totalChapters) {
-  readingProgress[bookKey] = totalChapters ? { chapter: chapterIdx, total: totalChapters } : chapterIdx;
-  S.setItem('readingProgress', JSON.stringify(readingProgress));
+  State.readingProgress[bookKey] = totalChapters ? { chapter: chapterIdx, total: totalChapters } : chapterIdx;
+  S.setItem('readingProgress', JSON.stringify(State.readingProgress));
 }
 
 // ── 滚动位置 ──
@@ -49,7 +52,7 @@ function restoreScrollPos(bookKey) {
     const raw = S.getItem('scrollPos_' + bookKey);
     if (raw) {
       const pos = JSON.parse(raw);
-      if (Date.now() - pos.timestamp < 86400000) { // 24h 内有效
+      if (Date.now() - pos.timestamp < 86400000) {
         const el = document.getElementById('content');
         if (el) el.scrollTop = pos.scrollTop;
       }
@@ -63,14 +66,36 @@ window.addEventListener('load', () => {
   loadSources();
   loadProgress();
   applyReadingSettings();
+  setupEventDelegation();
 });
+
+// ── 事件委托 ──
+function setupEventDelegation() {
+  // 搜索结果/书架 点击事件委托
+  document.getElementById('searchResults').addEventListener('click', (e) => {
+    const card = e.target.closest('.book-card');
+    if (!card) return;
+    const idx = parseInt(card.dataset.index);
+    if (!isNaN(idx) && State.searchResults[idx]) {
+      openBook(State.searchResults[idx]);
+    }
+  });
+  document.getElementById('homeShelf').addEventListener('click', (e) => {
+    const card = e.target.closest('.book-card');
+    if (!card) return;
+    const idx = parseInt(card.dataset.index);
+    if (!isNaN(idx) && State.shelf[idx]) {
+      openBook(State.shelf[idx]);
+    }
+  });
+}
 
 // ── Navigation ──
 function showView(id) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const el = document.getElementById(id + 'View');
   if (el) el.classList.add('active');
-  currentView = id;
+  State.currentView = id;
 }
 
 function showHome() {
@@ -79,15 +104,15 @@ function showHome() {
 }
 
 function showDetail() {
-  if (currentBook) showView('detail');
+  if (State.currentBook) showView('detail');
 }
 
 function goBack() {
-  if (currentView === 'reader') {
+  if (State.currentView === 'reader') {
     showDetail();
-  } else if (currentView === 'detail') {
+  } else if (State.currentView === 'detail') {
     showView('search');
-  } else if (currentView === 'search') {
+  } else if (State.currentView === 'search') {
     showHome();
   } else {
     showHome();
@@ -106,10 +131,8 @@ function switchTab(tab, e) {
 }
 
 // ── Search ──
-let currentSearchType = '';  // '' / '0' / '1' / '2' / '4'
-
 function setSearchType(t, e) {
-  currentSearchType = t;
+  State.currentSearchType = t;
   document.querySelectorAll('.type-tab').forEach(b => b.classList.remove('active'));
   if (e && e.target) e.target.classList.add('active');
   const kw = document.getElementById('searchInput').value.trim();
@@ -119,7 +142,6 @@ function setSearchType(t, e) {
 async function doSearch() {
   const kw = document.getElementById('searchInput').value.trim();
   if (!kw) return;
-  // 先切到搜索视图，显示骨架屏
   showView('search');
   document.getElementById('resultCount').textContent = '搜索中...';
   document.getElementById('searchResults').innerHTML = Array(4).fill(0).map(() =>
@@ -134,11 +156,11 @@ async function doSearch() {
   ).join('');
   try {
     let url = `/api/search?q=${encodeURIComponent(kw)}`;
-    if (currentSearchType) url += `&type=${currentSearchType}`;
+    if (State.currentSearchType) url += `&type=${State.currentSearchType}`;
     const resp = await fetch(url);
-    const results = await resp.json();
-    document.getElementById('resultCount').textContent = `共 ${results.length} 条结果`;
-    renderSearchResults(results);
+    State.searchResults = await resp.json();
+    document.getElementById('resultCount').textContent = `共 ${State.searchResults.length} 条结果`;
+    renderSearchResults(State.searchResults);
   } catch (e) {
     document.getElementById('searchResults').innerHTML = '<div class="empty"><div class="icon">❌</div><p>搜索失败，请检查后端是否运行</p></div>';
   }
@@ -163,7 +185,7 @@ function bookCard(b, i) {
   const typeBadge = b.source_type != null ? `<span class="type-badge">${typeLabels[b.source_type] || ''}</span>` : '';
   const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
   const sourceHtml = b.source_name ? `<div class="source"><span class="dot"></span>${esc(b.source_name)}${typeBadge}</div>` : '';
-  return `<div class="book-card" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
+  return `<div class="book-card" data-index="${i}">
     <div class="cover"><div class="placeholder">${cover}</div></div>
     <div class="meta">
       <div class="name">${esc(b.name)}</div>
@@ -176,7 +198,7 @@ function bookCard(b, i) {
 
 // ── Book Detail ──
 async function openBook(b) {
-  currentBook = b;
+  State.currentBook = b;
   showView('loading');
   document.getElementById('loadingText').textContent = '正在加载详情...';
   try {
@@ -188,8 +210,8 @@ async function openBook(b) {
     const resp = await fetch(`/api/detail?${params}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-    currentBook = {...b, ...data};
-    chapters = data.chapters || [];
+    State.currentBook = {...b, ...data};
+    State.chapters = data.chapters || [];
     renderDetail();
     showView('detail');
   } catch (e) {
@@ -199,7 +221,7 @@ async function openBook(b) {
 }
 
 function renderDetail() {
-  const b = currentBook;
+  const b = State.currentBook;
   const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
   document.getElementById('detailHeader').innerHTML = `
     <div class="cover"><div class="placeholder">${cover}</div></div>
@@ -214,15 +236,15 @@ function renderDetail() {
       ${b.last_chapter ? `<div class="meta-row"><span>🔄 最新：${esc(b.last_chapter)}</span></div>` : ''}
       <div class="intro">${esc(b.intro||'暂无简介')}</div>
     </div>`;
-  const inShelf = shelf.some(s => s.source_url===b.source_url && s.book_url===b.book_url);
+  const inShelf = State.shelf.some(s => s.source_url===b.source_url && s.book_url===b.book_url);
   const bk = getBookKey(b);
-  const savedIdx = readingProgress[bk];
-  const hasProgress = savedIdx !== undefined && savedIdx >= 0 && savedIdx < chapters.length;
+  const savedIdx = State.readingProgress[bk];
+  const hasProgress = savedIdx !== undefined && savedIdx >= 0 && savedIdx < State.chapters.length;
   document.getElementById('detailActions').innerHTML = `
-    ${chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? '📖 继续阅读（第'+(savedIdx+1)+'章）' : '📖 开始阅读'}</button>` : ''}
+    ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? '📖 继续阅读（第'+(savedIdx+1)+'章）' : '📖 开始阅读'}</button>` : ''}
     <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? '💔 取消收藏' : '❤️ 加入书架'}</button>`;
-  document.getElementById('chapterCount').textContent = `📑 章节目录（${chapters.length} 章）`;
-  document.getElementById('chapterList').innerHTML = chapters.map((ch, i) => {
+  document.getElementById('chapterCount').textContent = `📑 章节目录（${State.chapters.length} 章）`;
+  document.getElementById('chapterList').innerHTML = State.chapters.map((ch, i) => {
     const isCurrent = hasProgress && i === savedIdx;
     const isRead = hasProgress && i < savedIdx;
     let cls = 'chapter-item';
@@ -236,7 +258,7 @@ function renderDetail() {
 async function loadSources() {
   try {
     const resp = await fetch('/api/sources');
-    sources = await resp.json();
+    State.sources = await resp.json();
     renderSources();
   } catch (e) {
     document.getElementById('sourceCount').textContent = '加载源失败';
@@ -244,12 +266,12 @@ async function loadSources() {
 }
 
 function renderSources() {
-  const total = sources.length;
-  const enabled = sources.filter(s => s.enabled).length;
-  const okCount = sources.filter(s => s.status === 'ok').length;
-  const partialCount = sources.filter(s => s.status === 'partial').length;
-  const deadCount = sources.filter(s => s.status === 'dead').length;
-  const untested = sources.filter(s => !s.status).length;
+  const total = State.sources.length;
+  const enabled = State.sources.filter(s => s.enabled).length;
+  const okCount = State.sources.filter(s => s.status === 'ok').length;
+  const partialCount = State.sources.filter(s => s.status === 'partial').length;
+  const deadCount = State.sources.filter(s => s.status === 'dead').length;
+  const untested = State.sources.filter(s => !s.status).length;
 
   let statusHtml = `${enabled}/${total} 源已启用`;
   if (okCount > 0) statusHtml += ` · <span style="color:var(--green)">${okCount} 可用</span>`;
@@ -260,7 +282,7 @@ function renderSources() {
 
   const el = document.getElementById('sourcesPanel');
   const groups = {};
-  sources.forEach(s => {
+  State.sources.forEach(s => {
     const g = s.group || '其他';
     if (!groups[g]) groups[g] = [];
     groups[g].push(s);
@@ -270,6 +292,7 @@ function renderSources() {
       <input type="text" id="sourceFilterInput" placeholder="🔍 筛选源..."
         style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"
         oninput="filterSources()">
+      <button id="filterFlaggedBtn" class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="filterFlagged()" title="只显示已标记源">🚩</button>
       <button class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="runHealthCheck()" title="检测源可用性">🔍 检测</button>
     </div>`;
   if (deadCount > 0) {
@@ -278,16 +301,18 @@ function renderSources() {
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
     html += list.map(s => {
-      // status: 'ok'(绿) / 'partial'(黄) / 'dead'(红) / null(灰)
       let dot = 'unknown';
       let title = '未检测';
       if (s.status === 'ok')      { dot = 'on';  title = '可用：搜索有结果'; }
       else if (s.status === 'partial') { dot = 'partial'; title = '部分：域名通但搜索状态不明'; }
       else if (s.status === 'dead')  { dot = 'off'; title = '失效：域名不可达'; }
-      return `<div class="source-item" onclick="toggleSource('${esc(s.url)}')" title="${title}">
+      const flagIcon = s.flagged ? '🔴' : '⚪';
+      const flagTitle = s.flagged ? (s.flag_notes ? `已标记: ${esc(s.flag_notes)}` : '已标记（点击取消）') : '点击标记此源';
+      return `<div class="source-item ${s.flagged ? 'flagged' : ''}" title="${title}">
         <span class="dot ${dot}"></span>
-        <span class="name">${esc(s.name)}</span>
+        <span class="name" onclick="event.stopPropagation();toggleSource('${esc(s.url)}')">${esc(s.name)}</span>
         <span class="badge">${s.type}</span>
+        <span class="flag-btn" onclick="event.stopPropagation();flagSource('${esc(s.url)}')" title="${flagTitle}">${flagIcon}</span>
       </div>`;
     }).join('');
   }
@@ -301,10 +326,8 @@ async function runHealthCheck() {
   toast('🔍 阶段1：检测域名连通性...');
   try {
     await fetch('/api/health_check', { method: 'POST' });
-    // 阶段1：域名 ping（~5秒）
     await new Promise(r => setTimeout(r, 5000));
     await loadSources();
-    // 阶段2：搜索测试（~15-20秒）
     toast('🔍 阶段2：测试搜索能力...');
     await new Promise(r => setTimeout(r, 15000));
     await loadSources();
@@ -320,7 +343,7 @@ async function toggleSource(url) {
       body: JSON.stringify({url})
     });
     await loadSources();
-    filterSources(); // 保持筛选状态
+    filterSources();
   } catch (e) { toast('操作失败'); }
 }
 
@@ -331,9 +354,7 @@ function filterSources() {
     const name = (el.querySelector('.name')?.textContent || '').toLowerCase();
     el.style.display = (!q || name.includes(q)) ? '' : 'none';
   });
-  // 隐藏空分组标题
   document.querySelectorAll('#sourcesPanel h3').forEach(h3 => {
-    const group = h3.nextElementSibling;
     let hasVisible = false;
     let sibling = h3.nextElementSibling;
     while (sibling && sibling.tagName !== 'H3') {
@@ -344,9 +365,42 @@ function filterSources() {
   });
 }
 
+// ── 源标记 ──
+async function flagSource(url) {
+  const notes = prompt('标记备注（可选，留空仅切换标记状态）：');
+  if (notes === null) return;
+  try {
+    const resp = await fetch('/api/flag_source', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url, notes: notes || ''})
+    });
+    const data = await resp.json();
+    await loadSources();
+    filterSources();
+    toast(data.flagged ? '🚩 已标记' : '✅ 已取消标记');
+  } catch(e) { toast('操作失败'); }
+}
+
+function filterFlagged() {
+  const btn = document.getElementById('filterFlaggedBtn');
+  const active = btn.classList.toggle('active');
+  document.querySelectorAll('#sourcesPanel .source-item').forEach(el => {
+    if (active) {
+      el.style.display = el.classList.contains('flagged') ? '' : 'none';
+    } else {
+      el.style.display = '';
+    }
+  });
+  if (active) {
+    const input = document.getElementById('sourceFilterInput');
+    if (input) input.value = '';
+  }
+  filterSources();
+}
+
 // ── 批量禁用失效源 ──
 async function batchDisableDead() {
-  const deadSources = sources.filter(s => s.status === 'dead' && s.enabled);
+  const deadSources = State.sources.filter(s => s.status === 'dead' && s.enabled);
   if (!deadSources.length) { toast('没有可禁用的失效源'); return; }
   if (!confirm(`确定要禁用 ${deadSources.length} 个失效源吗？`)) return;
   let count = 0;

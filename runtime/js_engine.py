@@ -1,21 +1,15 @@
 """
 Legado JS 双路径执行引擎
 - PyMiniRacer: 简单 <js>inline</js> 变换（无 ajax 依赖），~1ms
-- NodeWorker:  需要 java.ajax() 的完整 @js: 块，~5ms（持久进程，无需每次 fork）
-
-替代原来的 subprocess.run(["node", js_runner.js]) 单次执行模式。
+- NodeWorker:  需要 java.ajax() 的完整 @js: 块，~5ms（持久进程）
 """
-
 import json
-import os
 import subprocess
 import sys
 import threading
-import time
 import hashlib
 import base64
 import uuid
-import re
 import logging
 from pathlib import Path
 
@@ -23,10 +17,12 @@ from py_mini_racer import MiniRacer
 
 logger = logging.getLogger(__name__)
 
-# ── PyMiniRacer 简单 shims（注入到 V8 上下文） ──
+# ── PyMiniRacer 最小 shims ──
+# 只包含 btoa/atob、java.put/get、source.put/get 等不需要 ajax 的 API
+# 完整 API（ajax、md5、HMAC 等）在 js_worker.js 中有 Node.js 原生实现
 
 SIMPLE_SHIMS_JS = r"""
-// ── btoa / atob polyfill（V8 纯上下文无此函数）──
+// ── btoa / atob polyfill ──
 var btoa = function(s) {
     var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
     var r = '';
@@ -74,83 +70,21 @@ function utf8Decode(s) {
     return r;
 }
 
-// ── Buffer shim ──
-var Buffer = {
-    from: function(data, encoding) {
-        if (typeof data !== 'string') return { toString: function() { return String(data); }, subarray: function() { return Buffer.from(data, encoding); } };
-        if (encoding === 'base64') {
-            var decoded = utf8Decode(atob(data));
-            return { toString: function(enc) { return decoded; }, subarray: function(s, e) { return Buffer.from(decoded.substring(s, e)); } };
-        }
-        if (encoding === 'hex') {
-            var r = '';
-            for (var i = 0; i < data.length; i += 2) r += String.fromCharCode(parseInt(data.substr(i, 2), 16));
-            return { toString: function() { return r; }, subarray: function() { return Buffer.from(r); } };
-        }
-        // 默认：字符串本身
-        return {
-            toString: function(enc) {
-                if (enc === 'base64') return btoa(utf8Encode(data));
-                if (enc === 'hex') { var h=''; for(var i=0;i<data.length;i++) h+=data.charCodeAt(i).toString(16).padStart(2,'0'); return h; }
-                return data;
-            },
-            subarray: function(s, e) { return Buffer.from(data.substring(s, e)); }
-        };
-    }
-};
-
-// ── crypto stub ──
-var crypto = {
-    createHash: function() { return { update: function() { return this; }, digest: function() { return ''; } }; },
-    createHmac: function() { return { update: function() { return this; }, digest: function() { return ''; } }; },
-    createCipheriv: function() { throw new Error('Not available in simple mode'); },
-    createDecipheriv: function() { throw new Error('Not available in simple mode'); },
-    randomUUID: function() { return '00000000-0000-0000-0000-000000000000'; }
-};
-
 // ── 存储 ──
 var __py_store = {};
 
 var java = {
     ajax: function() { throw new Error('java.ajax not available in simple mode, use full mode'); },
     ajaxAll: function() { throw new Error('java.ajaxAll not available in simple mode'); },
-    md5Encode: function(s) { return ''; },
     base64Encode: function(s) { return btoa(utf8Encode(String(s))); },
     base64Decode: function(s) { return utf8Decode(atob(String(s))); },
-    hexDecodeToString: function(hex) {
-        var r = '';
-        for (var i = 0; i < hex.length; i += 2) r += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
-        return utf8Decode(r);
-    },
     encodeURI: function(s) { return encodeURIComponent(String(s)); },
-    HMacHex: function() { return ''; },
-    desEncodeToBase64String: function() { return ''; },
-    aesBase64DecodeToString: function() { return ''; },
-    aesBase64DecodeToByteArray: function() { return ''; },
     randomUUID: function() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16); }); },
     put: function(k, v) { __py_store[k] = v; return v; },
     get: function(k) { return __py_store[k] || ''; },
     log: function() {},
     toast: function() {},
     longToast: function() {},
-    timeFormat: function(ts) { return new Date(ts).toLocaleString('zh-CN'); },
-    timeFormatUTC: function(ts) { return new Date(ts).toISOString(); },
-    getString: function() { return ''; },
-    getStringList: function() { return []; },
-    getElements: function() { return []; },
-    androidId: function() { return '0000000000000000'; },
-    getWebViewUA: function() { return 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36'; },
-    t2s: function(t) { return String(t); },
-    openUrl: function() {},
-    startBrowser: function() {},
-    startBrowserAwait: function() {},
-    refreshTocUrl: function() {},
-    webView: function() { return ''; },
-    connect: function() { return { raw: function() { return { request: function() { return { url: function() { return ''; } } } } } }; },
-    post: function() { return { header: function() { return ''; } }; },
-    get: function() { return ''; },
-    setCookie: function() {},
-    getCookie: function() { return ''; },
 };
 
 var cookie = {
@@ -168,14 +102,6 @@ var source = {
     loginUrl: '', bookSourceComment: '',
     put: function(k, v) { __py_store['src_' + k] = v; },
     get: function(k) { return __py_store['src_' + k] || ''; },
-};
-
-var Packages = {
-    java: { util: { UUID: { randomUUID: function() { return java.randomUUID(); } } } },
-    android: {
-        os: { Build: { MODEL: 'PC', MANUFACTURER: 'Unknown' } },
-        text: { TextUtils: { isEmpty: function(s) { return !s || s.length === 0; } } },
-    },
 };
 """
 
@@ -212,22 +138,19 @@ class SimpleRuntime:
     def execute(self, code, result_value='', source_url=''):
         """执行简单 JS 变换，返回字符串结果"""
         try:
-            # 重置 store
             self._ctx.eval('__py_store = {};')
             self._ctx.eval(f'source.key = {json.dumps(source_url)};')
 
-            # 自动为最后一行加 return
             wrapped = self._auto_return(code)
 
-            # 构造执行函数
             fn_code = f"""
             (function() {{
                 var result = {json.dumps(str(result_value))};
                 var key = '';
                 var page = 1;
                 try {{
-                    var fn = new Function('java', 'cookie', 'source', 'key', 'page', 'Packages', 'result', {json.dumps(wrapped)});
-                    return fn(java, cookie, source, key, page, Packages, result);
+                    var fn = new Function('java', 'cookie', 'source', 'key', 'page', 'result', {json.dumps(wrapped)});
+                    return fn(java, cookie, source, key, page, result);
                 }} catch(e) {{
                     return result;
                 }}
@@ -260,7 +183,7 @@ class NodeWorker:
         self._proc = None
         self._lock = threading.Lock()
         self._request_count = 0
-        self._max_requests = 2000  # 每隔 N 次请求重启，防内存泄漏
+        self._max_requests = 2000
         self._start()
 
     def _start(self):
@@ -283,25 +206,18 @@ class NodeWorker:
             return self._call_unsafe(params_dict)
 
     def _call_unsafe(self, params_dict):
-        """内部调用，不加锁"""
         self._request_count += 1
-
-        # 定期重启防止内存泄漏
         if self._request_count > self._max_requests:
             self._restart_unsafe()
-
-        # 检查进程是否存活
         if self._proc.poll() is not None:
             logger.warning("NodeWorker died, restarting...")
             self._restart_unsafe()
-
         try:
             line = json.dumps(params_dict, ensure_ascii=False) + '\n'
             self._proc.stdin.write(line)
             self._proc.stdin.flush()
             result_line = self._proc.stdout.readline()
             if not result_line:
-                # 进程可能已死
                 logger.warning("NodeWorker returned empty, restarting...")
                 self._restart_unsafe()
                 return {'error': 'Worker restarted, please retry'}
@@ -312,7 +228,6 @@ class NodeWorker:
             return {'error': f'Worker error: {e}'}
 
     def _restart_unsafe(self):
-        """杀死并重启工作进程（不加锁，调用者负责加锁）"""
         try:
             self._proc.terminate()
             self._proc.wait(timeout=3)
@@ -324,7 +239,6 @@ class NodeWorker:
         self._start()
 
     def restart(self):
-        """公开重启方法（加锁）"""
         with self._lock:
             self._restart_unsafe()
 
@@ -335,7 +249,6 @@ class NodeWorker:
 class LegadoRuntime:
     """双路径 JS 执行引擎"""
 
-    # 需要走 NodeWorker 的关键字
     _AJAX_KEYWORDS = ('ajax', 'ajaxAll', 'getString', 'getStringList', 'getElements',
                       'connect(', 'startBrowser', 'webView(', 'require(',
                       'md5Encode', 'HMacHex', 'desEncode', 'aesBase64')
@@ -345,17 +258,14 @@ class LegadoRuntime:
         self._worker = NodeWorker()
 
     def _needs_full_mode(self, code):
-        """判断代码是否需要 ajax 等 Node.js 专属 API"""
         code_lower = code.lower()
         return any(kw.lower() in code_lower for kw in self._AJAX_KEYWORDS)
 
     def execute_simple(self, code, result_value='', source_url=''):
-        """简单 JS 变换（PyMiniRacer，~1ms）"""
         return self._simple.execute(code, result_value, source_url)
 
     def execute_full(self, code, key='', page=1, source_url='',
                      headers=None, store=None, result_value=''):
-        """完整 JS 执行（NodeWorker，~5ms）"""
         params = {
             'code': str(code),
             'key': str(key or ''),
@@ -368,7 +278,7 @@ class LegadoRuntime:
         return self._worker.call(params)
 
     def run_legado_js(self, js_code, result_value='', source_url=''):
-        """替换原 app.py 的 run_legado_js()"""
+        """执行 Legado <js> 或 @js: 代码块"""
         if self._needs_full_mode(js_code):
             result = self.execute_full(js_code, source_url=source_url, result_value=result_value)
             if 'error' in result:
@@ -380,7 +290,7 @@ class LegadoRuntime:
             return self.execute_simple(js_code, result_value, source_url)
 
     def run_js(self, code, key='', page=1, source_url='', headers=None, store=None):
-        """替换原 app.py 的 run_js()"""
+        """执行完整 JS 代码（@js: 块级别）"""
         result = self.execute_full(code, key=key, page=page, source_url=source_url,
                                    headers=headers, store=store)
         return result

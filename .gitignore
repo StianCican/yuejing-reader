@@ -9,3 +9,4 @@ node_modules/
 .claude/
 test_results.json
 source_status.json
+flagged_sources.json

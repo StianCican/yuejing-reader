@@ -1,6 +1,6 @@
 # 阅境 · 小说聚合阅读器
 
-本地小说聚合阅读器，基于 Legado（开源阅读）书源格式，聚合多个网站的小说/漫画/听书内容，浏览器打开即用。**加载 411 个书源，支持 5 种内容类型。**
+本地小说聚合阅读器，基于 Legado（开源阅读）书源格式，聚合多个网站的小说/漫画内容，浏览器打开即用。**加载 411 个书源，支持 4 种内容类型。**
 
 ## 功能特性
 
@@ -9,16 +9,14 @@
 |------|------|------|
 | 小说 | ✅ 全功能 | 正文阅读 + 字体/字号/行高/主题自定义 |
 | 漫画 | ✅ 滚动阅读 | 纵向滚动 + 懒加载 + 图片代理防盗链 |
-| 听书 | ✅ 音频播放 | HTML5 `<audio>` 播放器 + 折叠文本面板 |
 | 影视 | ⚠️ 基础 | 数据可查，播放器待完善 |
 | 文件 | ⚠️ 基础 | 目录可查 |
 
 ### 🔍 智能搜索
-- **全源并发搜索**：411 个源 40 线程并发，1.5s 最低搜索时间确保慢源响应
+- **全源并发搜索**：411 个源 40 线程并发，`wait()/FIRST_COMPLETED` 增量收集
 - **结果排序**：精确书名匹配优先 → 健康源优先 → 小说类型优先
-- **5 分钟缓存**：同关键词秒回
-- **类型筛选**：一键切换小说/漫画/听书/影视
-- **源失败自动降权**：连续 3 次搜索失败自动标记为失效
+- **类型筛选**：一键切换小说/漫画
+- **源失败指数退避**：连续 5 次搜索失败才标记为失效（状态持久化）
 
 ### 📚 阅读体验
 - 段落式正文渲染 + 暗色/宣纸/青绿三种主题
@@ -34,7 +32,7 @@
 
 ### 🔧 规则引擎
 - JSON API / CSS 选择器 / JS 搜索三种源类型
-- 完整 Legado DSL：`$.path`、`<js>`、`@js:`、`@put/@get`、`&&` 链、`||` 回退、`##` 正则、`{{}}` 模板插值
+- 完整 Legado DSL：`$.path`、`<js>`、`@js:`、`@put/@get`、`@Header:{...}` 内联请求头、`&&` 链、`||` 回退、`##` 正则、`{{}}` 模板（含 `{{baseUrl}}`）
 - 通用 CSS 回退选择器（规则失效时自动尝试）
 - `replaceRegex` + `nextContentUrl` 多页内容拼接
 
@@ -47,7 +45,7 @@
 
 | 层 | 技术 | 说明 |
 |----|------|------|
-| 后端 | Python 3 + Flask | 单文件 ~2100 行 |
+| 后端 | Python 3 + Flask | 模块化架构（~1500 行，6个模块包） |
 | JS 快速路径 | PyMiniRacer (V8) | 进程内执行 `<js>` 变换，~1ms |
 | JS 完整路径 | Node.js 持久 Worker | `@js:` 块执行（含 ajax），~5ms |
 | 前端 | Vanilla JS + CSS | 零框架、零构建 |
@@ -67,23 +65,35 @@ python app.py [path-to-book-sources.json]
 ## 项目结构
 
 ```
-├── app.py                         # Flask 后端（~2100 行）
-├── js_runtime.py                  # 双路径 JS 运行时（PyMiniRacer + NodeWorker）
-├── js_worker.js                   # 持久 Node.js 工作进程
-├── requirements.txt               # Python 依赖
+├── app.py                         # Flask 路由（~228 行）
+├── sources/                       # 书源抽象层
+│   ├── base.py                    # BaseSource 基类（模板方法模式）
+│   ├── json_api.py                # JsonApiSource — JSON API 源
+│   ├── css.py                     # CssSource — HTML/CSS 选择器源
+│   ├── js.py                      # JsSource — @js: 动态 URL 源
+│   └── manager.py                 # SourceManager — 加载、搜索、健康检测
+├── rules/                         # Legado DSL 规则引擎
+│   ├── parser.py                  # 规则分割、解析、JSONPath、模板插值
+│   ├── extractors.py              # extract_val / extract_img / extract_link
+│   ├── css_conv.py                # Legado CSS → 标准 CSS 转换
+│   └── variables.py               # @put/@get 变量系统（contextvars）
+├── runtime/                       # JS 双路径执行引擎
+│   ├── js_engine.py               # LegadoRuntime (MiniRacer + NodeWorker)
+│   └── js_worker.js               # 持久 Node.js 工作进程
+├── utils/                         # 工具函数
+│   ├── http.py                    # 全局 session、safe_json、URL 拼接
+│   ├── text.py                    # 文本清洗、replaceRegex、CSS 回退
+│   └── images.py                  # 漫画图片 URL 提取
+├── requirements.txt
 ├── shelf.json                     # 书架持久化
-├── source_status.json             # 源健康状态持久化
 ├── templates/
 │   └── index.html                 # HTML 骨架
 ├── static/
 │   ├── css/
-│   │   ├── base.css               # 变量、reset、布局、暗色主题
-│   │   ├── components.css         # 组件：书卡、源项、按钮、toast、骨架屏
-│   │   ├── reader.css             # 阅读器 + 漫画 + 音频播放器
-│   │   └── home.css               # 首页样式
+│   │   └── style.css              # 合并单文件 CSS
 │   └── js/
-│       ├── app.js                 # 全局状态、搜索、书源管理
-│       ├── reader.js              # 文本阅读器 + 音频播放器
+│       ├── app.js                 # State 对象、搜索、事件委托
+│       ├── reader.js              # 文本阅读器 + 漫画路由
 │       ├── comic_reader.js        # 漫画滚动阅读器（懒加载）
 │       ├── shelf.js               # 书架管理
 │       └── settings.js            # 阅读设置面板
@@ -100,7 +110,7 @@ python app.py [path-to-book-sources.json]
 | `/api/toggle_source` | POST | 切换书源开关 | `{"url":"..."}` |
 | `/api/search` | GET | 聚合搜索 | `q` `page` `source` `type`(0-4) |
 | `/api/detail` | GET | 书籍详情+目录 | `source` `url` `name` `author` `cover` `intro` |
-| `/api/chapter` | GET | 章节内容（文本/漫画/音频） | `source` `url` |
+| `/api/chapter` | GET | 章节内容（文本/漫画） | `source` `url` |
 | `/api/shelf` | GET | 书架列表 | — |
 | `/api/shelf` | POST | 添加/移除收藏（toggle） | `{"source_url":"...","book_url":"..."}` |
 | `/api/proxy` | GET | 图片代理（防盗链） | `url` `referer` |
@@ -114,9 +124,9 @@ python app.py [path-to-book-sources.json]
 | 语言 | Python + Flask | Node.js + Express | Python 生态更适合文本处理 |
 | JS 执行 | PyMiniRacer(1ms) + NodeWorker(5ms) | vm.Script(~1ms) | 等同水平，Node 原生 JS 更简单 |
 | JS 环境 | 手动 shim（btoa/atob/md5/curl） | Node 原生 | ⚠️ 本项目 shim 不完整时有兼容问题 |
-| 规则引擎 | Legado DSL 80%覆盖 | Legado DSL 95%覆盖 | ⚠️ 缺少 `@Header`、部分 CSS 伪类 |
+| 规则引擎 | Legado DSL 90%覆盖 | Legado DSL 95%覆盖 | 已追平大部分差距 |
 | 搜索策略 | 全源并发 + 结果排序 + 5min缓存 | 按类型分层 + 源池管理 | 各有优劣，本项目更激进 |
-| 内容类型 | 5 种（小说/漫画/听书/文件/影视） | 7 种（+音乐/视频直链） | 可追赶 |
+| 内容类型 | 3 种（小说/漫画/影视/文件） | 7 种（+音乐/视频直链） | 聚焦核心类型 |
 | 健康检测 | 域名ping + 搜索测试 + 持久化 | 基础连通性检测 | ✅ 本项目更完善 |
 | 图片代理 | ✅ SSRF防护 + Referer伪造 | ✅ | 等同 |
 | 前端架构 | Vanilla JS（零框架） | Vue + Element UI | Vue 组件化体验更好 |

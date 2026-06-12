@@ -12,7 +12,6 @@ function applyReadingSettings() {
   setLineHeight(lh);
   setTheme(theme);
   setFontFamily(ff);
-  // 同步滑块和显示值
   const fontSizeVal = document.getElementById('fontSizeVal');
   const lineHeightVal = document.getElementById('lineHeightVal');
   if (fontSizeVal) fontSizeVal.textContent = fs;
@@ -83,24 +82,14 @@ function setFontFamily(ff) {
   };
   if (reader) reader.style.fontFamily = fonts[ff] || fonts['serif'];
   S.setItem('fontFamily', ff);
-  // 更新按钮激活状态
   document.querySelectorAll('.font-btns button').forEach(b => {
     b.classList.toggle('active', b.dataset.font === ff);
   });
 }
 
-// 点击阅读区空白呼出设置（非文字选中时）
-document.addEventListener('click', (e) => {
-  if (currentView !== 'reader') return;
-  const content = document.getElementById('readerContent');
-  if (!content) return;
-  // 判断点击在阅读区内但不是文字选中操作
-  if (content.contains(e.target) && !window.getSelection()?.toString()) {
-    // 双击才呼出面板，避免误触
-  }
-});
+// 双击阅读区呼出设置面板
 document.getElementById('readerContent')?.addEventListener('dblclick', (e) => {
-  if (currentView === 'reader' && !window.getSelection()?.toString()) {
+  if (State.currentView === 'reader' && !window.getSelection()?.toString()) {
     openSettings();
   }
 });
