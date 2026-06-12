@@ -18,8 +18,12 @@ const State = {
 
 // ── 图片代理 ──
 function proxyUrl(url, referer) {
-  if (!url || !url.startsWith('http')) return url;
-  if (url.startsWith('/') || url.startsWith(window.location.origin)) return url;
+  if (!url) return url;
+  // 归一化：协议相对 → https
+  if (url.startsWith('//')) url = 'https:' + url;
+  // 非 HTTP 或本站资源不代理
+  if (!url.startsWith('http')) return url;
+  if (url.startsWith(window.location.origin)) return url;
   let proxy = '/api/proxy?url=' + encodeURIComponent(url);
   if (referer) proxy += '&referer=' + encodeURIComponent(referer);
   return proxy;

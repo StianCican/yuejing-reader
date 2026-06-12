@@ -13,7 +13,7 @@ from utils.http import (session, _join_url, safe_json, _parse_header,
                         _parse_inline_header, build_url, _parse_post_url)
 from utils.text import (clean_text, _apply_replace_regex, _fallback_content)
 from utils.images import (_extract_images_from_text, _extract_images_from_soup,
-                          _find_image_urls_in_json)
+                          _find_image_urls_in_json, _normalize_image_url)
 from rules.parser import _resolve_rule, resolve_tpl, jpath, walk_path
 from rules.extractors import (extract_val, extract_img, extract_link,
                                _try_css_select, parse_search_results)
@@ -352,6 +352,7 @@ def _extract_single_page(source, url, content_rules):
 def _fetch_chapter_images(source, ch_url):
     """漫画章节图片提取（统一入口）
     通过 source._fetch_raw() 获取数据，不再绕过源类直接做 HTTP 请求。
+    对混合型源（CSS搜索但JSON内容规则），自动尝试 JSON fetch 回退。
     """
     cr = source.content_r
     content_rule = cr.get('content', '')
@@ -360,13 +361,35 @@ def _fetch_chapter_images(source, ch_url):
     try:
         data, base_url = source._fetch_raw(_join_url(http_base, ch_url))
 
+        # 检查是否需要 JSON fetch（content_rule 是 JSON 路径但 fetch 返回了 HTML）
+        content_is_json = (content_rule.strip().startswith('$.') or
+                          content_rule.strip().startswith('[*]') or
+                          content_rule.strip().startswith('['))
+        if content_is_json and hasattr(data, 'select_one'):
+            # 混合型源：content_rule 要 JSON，但 CssSource._fetch_raw 返回了 soup。
+            # 尝试从同一 URL 以 JSON 方式获取
+            try:
+                actual_url, post_body, extra_headers = _parse_post_url(_join_url(http_base, ch_url))
+                headers = source._req_headers()
+                headers.update(extra_headers)
+                if post_body is not None:
+                    resp = http_requests.post(actual_url, json=post_body, headers=headers, timeout=15)
+                else:
+                    resp = http_requests.get(actual_url, headers=headers, timeout=15)
+                json_data, _ = safe_json(resp)
+                if json_data is not None:
+                    data = json_data
+                    base_url = actual_url
+            except Exception:
+                pass  # JSON fetch 失败，继续用 soup
+
         # 路径 1: 用 content_rule 从数据中提取
         if content_rule and data is not None:
             raw = _resolve_rule(content_rule, data, base_url)
             if raw:
                 # 检查是否为图片 URL 列表（JSON 数组）
                 if isinstance(raw, list):
-                    img_urls = [str(u) for u in raw if isinstance(u, str) and u.startswith('http')]
+                    img_urls = _list_to_image_urls(raw, base_url)
                     if img_urls:
                         return img_urls
                 raw_text = str(raw)
@@ -382,9 +405,18 @@ def _fetch_chapter_images(source, ch_url):
 
         # 路径 2: 数据本身就是列表
         if isinstance(data, list):
-            list_urls = [str(u) for u in data if isinstance(u, str) and u.startswith('http')]
-            if list_urls:
-                return list_urls
+            img_urls = _list_to_image_urls(data, base_url)
+            if img_urls:
+                return img_urls
+            # 列表元素可能是 dict，递归搜索每个元素的图片 URL
+            for item in data:
+                if isinstance(item, dict):
+                    found = _find_image_urls_in_json(item, base_url)
+                    for u in found:
+                        if u not in img_urls:
+                            img_urls.append(u)
+            if img_urls:
+                return img_urls
 
         # 路径 3: BeautifulSoup 上下文
         if hasattr(data, 'select_one'):
@@ -392,10 +424,31 @@ def _fetch_chapter_images(source, ch_url):
 
         # 路径 4: JSON 递归查找
         if data is not None and isinstance(data, dict):
-            found = _find_image_urls_in_json(data)
+            found = _find_image_urls_in_json(data, base_url)
             if found:
                 return found
 
         return []
     except Exception:
         return []
+
+
+def _list_to_image_urls(items, base_url=''):
+    """从列表中提取图片 URL（元素可为字符串或含 url/src/img 等键的 dict）"""
+    img_urls = []
+    for item in items:
+        url = None
+        if isinstance(item, str):
+            url = item
+        elif isinstance(item, dict):
+            # 按优先级尝试常见图片 URL 键名
+            for key in ('url', 'src', 'img', 'image', 'pic', 'path', 'href', 'link', 'uri'):
+                v = item.get(key)
+                if isinstance(v, str) and v.strip():
+                    url = v
+                    break
+        if url:
+            norm = _normalize_image_url(str(url).strip(), base_url)
+            if norm and norm not in img_urls:
+                img_urls.append(norm)
+    return img_urls
