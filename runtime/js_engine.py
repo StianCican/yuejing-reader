@@ -141,7 +141,7 @@ class SimpleRuntime:
             self._ctx.eval('__py_store = {};')
             self._ctx.eval(f'source.key = {json.dumps(source_url)};')
 
-            wrapped = self._auto_return(code)
+            wrapped = self._wrap_js_code(code)
 
             fn_code = f"""
             (function() {{
@@ -165,15 +165,43 @@ class SimpleRuntime:
             return str(result_value)
 
     @staticmethod
-    def _auto_return(code):
-        """为不含 return 的代码最后一行自动加 return"""
-        lines = code.split('\n')
-        last_idx = len(lines) - 1
-        while last_idx >= 0 and lines[last_idx].strip() == '':
-            last_idx -= 1
-        if last_idx >= 0 and not lines[last_idx].strip().startswith('return '):
-            lines[last_idx] = 'return ' + lines[last_idx]
-        return '\n'.join(lines)
+    def _wrap_js_code(code):
+        """包装 JS 代码以正确捕获返回值
+
+        原 _auto_return 在首行加 return 会把多语句代码（如 a=...; b=...; expr）
+        变成 return a=...; b=...（后半截死代码）。改为 eval() 方式：
+        eval("stmt1; stmt2; lastExpr") 返回 lastExpr 的值，所有语句都会执行。
+        """
+        import re as _re
+        code = code.strip()
+        if not code:
+            return 'return ' + json.dumps(code)
+        # 已有显式 return → 直接使用
+        if _re.search(r'(?:^|;|\n)\s*return\s', code):
+            return code
+        # 用 eval 捕获 completion value
+        return 'return eval(' + json.dumps(code) + ')'
+
+
+def _resolve_node_executable():
+    """
+    定位 node 可执行文件，优先级：
+      1. PyInstaller 解包目录 (sys._MEIPASS) 下的 runtime/bin/node[.exe]
+      2. 项目内便携版 runtime/bin/node[.exe]
+      3. 系统 PATH 中的 node（开发兜底）
+    """
+    exe_name = 'node.exe' if sys.platform == 'win32' else 'node'
+    candidates = []
+    # PyInstaller 解包目录
+    meipass = getattr(sys, '_MEIPASS', None)
+    if meipass:
+        candidates.append(Path(meipass) / 'runtime' / 'bin' / exe_name)
+    # 项目内便携版（开发模式）
+    candidates.append(Path(__file__).parent / 'bin' / exe_name)
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return 'node'  # 系统兜底
 
 
 class NodeWorker:
@@ -184,21 +212,35 @@ class NodeWorker:
         self._lock = threading.Lock()
         self._request_count = 0
         self._max_requests = 2000
+        self._node_cmd = _resolve_node_executable()
         self._start()
 
     def _start(self):
         worker_path = Path(__file__).parent / 'js_worker.js'
+        # PyInstaller 模式下 js_worker.js 也在 _MEIPASS/runtime/ 下
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass and not worker_path.exists():
+            worker_path = Path(meipass) / 'runtime' / 'js_worker.js'
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-        self._proc = subprocess.Popen(
-            ['node', str(worker_path)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding='utf-8',
-            creationflags=flags,
-        )
+        try:
+            self._proc = subprocess.Popen(
+                [self._node_cmd, str(worker_path)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8',
+                creationflags=flags,
+            )
+        except FileNotFoundError:
+            logger.error(
+                "无法启动 Node.js worker：未找到 node 可执行文件 (%s)。"
+                "若为开发模式请确保系统已安装 Node.js，"
+                "若为发布版请检查 runtime/bin/node%s 是否存在。",
+                self._node_cmd, '.exe' if sys.platform == 'win32' else ''
+            )
+            raise
         self._request_count = 0
-        logger.info("NodeWorker started (pid=%s)", self._proc.pid)
+        logger.info("NodeWorker started (pid=%s, exe=%s)", self._proc.pid, self._node_cmd)
 
     def call(self, params_dict):
         """发送一个请求，获取一个响应。线程安全。"""
