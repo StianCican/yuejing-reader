@@ -39,6 +39,20 @@ def save_shelf(data):
 
 app = Flask(__name__)
 
+# 开发模式：禁用静态文件缓存，每次加载最新版本
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+
+@app.after_request
+def _add_no_cache_headers(response):
+    """强制不缓存 HTML/JS/CSS，确保修改后浏览器立即加载最新版本"""
+    if request.path.endswith(('.html', '.js', '.css')) or request.path == '/':
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 
 @app.route('/')
 def index():
@@ -140,7 +154,33 @@ def api_detail():
     book = src.detail(book_url, search_data)
     book['source_url'] = source_url
     book['book_url'] = book_url
-    book['source_type'] = getattr(src, 'source_type', 0)
+    stype = getattr(src, 'source_type', 0)
+    book['source_type'] = stype
+    # 漫画/图片类源 0 章节时附加诊断信息
+    if stype in (2,) and not book.get('chapters'):
+        raw_diag = book.pop('_detail_diag', None) or getattr(src, '_last_detail_diag', None)
+        diag = {
+            'level': 'detail',
+            'warnings': [f'源「{src.name}」返回 0 章节 — 可能反爬拦截或源配置失效'],
+            'source_name': src.name,
+            'source_type': stype,
+            'source_group': getattr(src, 'group', ''),
+        }
+        if raw_diag:
+            diag['fetch_ok'] = raw_diag.get('fetch_ok')
+            diag['data_type'] = raw_diag.get('data_type', '')
+            diag['data_sample'] = (raw_diag.get('data_sample') or '')[:250]
+            diag['chapter_list_rule'] = raw_diag.get('chapter_list_rule', '')
+            diag['rule_match'] = raw_diag.get('rule_match')
+            diag['fetch_error'] = raw_diag.get('fetch_error', '')
+            ab = raw_diag.get('anti_bot')
+            if ab and ab.get('blocked'):
+                diag['anti_bot'] = {
+                    'block_type': ab.get('block_type'),
+                    'evidence': (ab.get('evidence') or '')[:150],
+                    'suggested_fix': ab.get('suggested_fix'),
+                }
+        book['diagnostics'] = diag
     return jsonify(book)
 
 
@@ -152,11 +192,17 @@ def api_chapter():
     if not src:
         return jsonify(error='源未找到'), 404
     stype = getattr(src, 'source_type', 0)
-    # 漫画：返回图片列表
+    # 漫画：返回图片列表 + 诊断信息
     if stype == 2:
         imgs = src.chapter_images(ch_url)
-        return jsonify(content_type='comic', images=imgs,
-                       source_url=source_url, count=len(imgs))
+        # 兼容新旧返回格式：新格式为 {images, diagnostics}，旧格式为 list
+        if isinstance(imgs, dict):
+            return jsonify(content_type='comic', images=imgs['images'],
+                           source_url=source_url, count=len(imgs['images']),
+                           diagnostics=imgs['diagnostics'])
+        else:
+            return jsonify(content_type='comic', images=imgs,
+                           source_url=source_url, count=len(imgs))
     # 默认：文本
     content = src.chapter_content(ch_url)
     return jsonify(content_type='text', content=content)
@@ -225,4 +271,4 @@ if __name__ == '__main__':
     print('║   本地小说聚合阅读器                  ║')
     print('║   http://localhost:5000               ║')
     print('╚══════════════════════════════════════╝')
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -63,7 +63,7 @@ def extract_val(ctx, sel, default='', base_url=''):
                     if not sub:
                         continue
                     base_p, hash_rules = _parse_hash_rules(sub)
-                    base_p = base_p.strip()
+                    base_p = base_p.strip().lstrip('-')
                     if not base_p:
                         continue
                     key = base_p[2:] if base_p.startswith('$.') else base_p
@@ -74,7 +74,7 @@ def extract_val(ctx, sel, default='', base_url=''):
                     return ' '.join(pieces)
                 continue
             base_p, hash_rules = _parse_hash_rules(p)
-            base_p = base_p.strip()
+            base_p = base_p.strip().lstrip('-')
             if not base_p:
                 continue
             key = base_p[2:] if base_p.startswith('$.') else base_p
@@ -106,7 +106,7 @@ def extract_img(ctx, sel, base_url=''):
             if not p:
                 continue
             base_p, hash_rules = _parse_hash_rules(p)
-            base_p = base_p.strip()
+            base_p = base_p.strip().lstrip('-')
             if not base_p:
                 continue
             key = base_p[2:] if base_p.startswith('$.') else base_p
@@ -138,7 +138,7 @@ def extract_link(ctx, sel, base_url=''):
             if not p:
                 continue
             base_p, hash_rules = _parse_hash_rules(p)
-            base_p = base_p.strip()
+            base_p = base_p.strip().lstrip('-')
             if not base_p:
                 continue
             key = base_p[2:] if base_p.startswith('$.') else base_p

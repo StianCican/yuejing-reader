@@ -179,3 +179,205 @@ def _parse_post_url(url):
         except (json.JSONDecodeError, Exception):
             pass
     return actual_url, post_body, extra_headers
+
+
+# ════════════════════════════════════════════════════════════════
+# 反爬/拦截检测
+# ════════════════════════════════════════════════════════════════
+
+def inspect_anti_bot(data, content_rule='', url=''):
+    """检视 _fetch_raw 返回的 data，识别反爬/拦截模式。
+
+    参数:
+        data: dict | BeautifulSoup | str | list | None — 原始响应数据
+        content_rule: str — 源的 content 规则（用于判断预期类型）
+        url: str — 请求 URL（用于日志）
+
+    返回:
+        dict: {blocked, block_type, evidence, suggested_fix}
+    """
+    result = {'blocked': False, 'block_type': None,
+              'evidence': '', 'suggested_fix': None}
+
+    if data is None:
+        result['blocked'] = True
+        result['block_type'] = 'empty_body'
+        result['evidence'] = '响应数据为 None'
+        result['suggested_fix'] = '检查源 URL 是否可达，或添加 @Header:{Referer:...}'
+        return result
+
+    # ── 路径 A: BeautifulSoup → HTML 页面 ──
+    if hasattr(data, 'select_one'):
+        text = str(data)[:5000]
+        text_lower = text.lower()
+
+        # CF 五秒盾
+        cf_patterns = [
+            ('cf-browser-verify', 'CloudFlare 浏览器验证'),
+            ('_cf_chl_opt', 'CloudFlare 挑战参数'),
+            ('challenge-platform', 'CloudFlare 挑战平台'),
+            ('cf-challenge', 'CloudFlare 挑战'),
+            ('cf-wrapper', 'CloudFlare 包装页'),
+        ]
+        for pat, desc in cf_patterns:
+            if pat in text_lower:
+                result['blocked'] = True
+                result['block_type'] = 'cloudflare'
+                result['evidence'] = f'页面含 "{pat}" — {desc}'
+                result['suggested_fix'] = '无法自动绕过，建议检查源是否仍存活'
+                return result
+
+        # JS 跳转挑战
+        js_challenge_patterns = [
+            (r'<script[^>]*>document\.location', 'JS document.location 跳转'),
+            (r'<script[^>]*>window\.location\.href', 'JS window.location 跳转'),
+            (r'<script[^>]*>location\.replace', 'JS location.replace 跳转'),
+            (r'<script[^>]*>location\.href', 'JS location.href 跳转'),
+        ]
+        for pat, desc in js_challenge_patterns:
+            if re.search(pat, text_lower):
+                result['blocked'] = True
+                result['block_type'] = 'js_challenge'
+                result['evidence'] = f'页面含 {desc}'
+                result['suggested_fix'] = '可能需 Cookie/Referer 支持，尝试用详情页 Referer 重试'
+                return result
+
+        # 验证码
+        captcha_keywords = [
+            'captcha', '验证码', '滑块验证', '请完成验证', '点击验证',
+            'verifycode', 'validatecode', 'geetest', '极验', '请点击验证',
+            '人机验证', '安全验证', '请输入验证码', 'verify_code',
+        ]
+        for kw in captcha_keywords:
+            if kw.lower() in text_lower:
+                result['blocked'] = True
+                result['block_type'] = 'captcha'
+                result['evidence'] = f'页面含验证码关键词: "{kw}"'
+                result['suggested_fix'] = '无法自动绕过，需手动处理验证码'
+                return result
+
+        # 登录墙
+        login_keywords = [
+            '请登录', '立即登录', 'needlogin', 'login-form', 'signin',
+            '请先登录', '登录后查看', 'user-login', 'member-login',
+        ]
+        for kw in login_keywords:
+            if kw.lower() in text_lower:
+                result['blocked'] = True
+                result['block_type'] = 'login_wall'
+                result['evidence'] = f'页面含登录关键词: "{kw}"'
+                result['suggested_fix'] = '需配置源登录信息（loginUrl / header 中加 Cookie）'
+                return result
+
+        # 频率限制（HTML 页面中）
+        rate_keywords = [
+            '访问过于频繁', 'too frequent', 'rate limit', '请求过于频繁',
+            '操作过于频繁', '稍后再试', 'too many requests',
+        ]
+        for kw in rate_keywords:
+            if kw.lower() in text_lower:
+                result['blocked'] = True
+                result['block_type'] = 'rate_limit'
+                result['evidence'] = f'页面含频率限制关键词: "{kw}"'
+                result['suggested_fix'] = '等待 2-5 秒后重试'
+                return result
+
+        # HTML 页面但 content_rule 是 JSON 路径 → 可能被重定向
+        if content_rule and (content_rule.strip().startswith('$.') or
+                             content_rule.strip().startswith('[')):
+            result['blocked'] = True
+            result['block_type'] = 'html_not_json'
+            page_title = ''
+            try:
+                t = data.select_one('title')
+                if t:
+                    page_title = t.get_text(strip=True)[:80]
+            except Exception:
+                pass
+            result['evidence'] = (f'预期 JSON 但返回 HTML 页面'
+                                  f'{": " + page_title if page_title else ""}')
+            result['suggested_fix'] = '尝试用移动端 UA + 详情页 Referer 重试'
+            return result
+
+        return result
+
+    # ── 路径 B: dict → JSON API 响应 ──
+    if isinstance(data, dict):
+        # 检查 API 错误码
+        error_indicators = []
+
+        # 检查 code/errno/status 等字段
+        for field in ('code', 'errno', 'status', 'ret', 'error_code', 'result'):
+            v = data.get(field)
+            if v is not None:
+                # 非 0、非 'ok'、非 200 都可能是错误
+                if isinstance(v, int) and v != 0 and v != 200:
+                    error_indicators.append(f'{field}={v}')
+                elif isinstance(v, str) and v.lower() not in ('ok', 'success', '0'):
+                    error_indicators.append(f'{field}="{v}"')
+
+        # 检查 msg/message 字段
+        msg = data.get('msg') or data.get('message') or data.get('err_msg') or ''
+        if msg and isinstance(msg, str):
+            msg_lower = msg.lower()
+            # 频率限制
+            rate_keywords = [
+                'too frequent', 'rate limit', '访问过于频繁', '频率',
+                'too many requests', '请求过快', '稍后再试',
+            ]
+            for kw in rate_keywords:
+                if kw.lower() in msg_lower:
+                    result['blocked'] = True
+                    result['block_type'] = 'rate_limit'
+                    result['evidence'] = f'API 返回: {msg[:120]}'
+                    result['suggested_fix'] = '等待 2 秒后重试'
+                    return result
+            # 登录/鉴权
+            auth_keywords = [
+                'login', 'auth', 'token', '登录', '鉴权', 'unauthorized',
+                '请登录', 'need login', 'not logged in',
+            ]
+            for kw in auth_keywords:
+                if kw.lower() in msg_lower:
+                    result['blocked'] = True
+                    result['block_type'] = 'login_wall'
+                    result['evidence'] = f'API 返回: {msg[:120]}'
+                    result['suggested_fix'] = '需配置源登录 Cookie/Token'
+                    return result
+
+        if error_indicators:
+            result['blocked'] = True
+            result['block_type'] = 'api_error'
+            result['evidence'] = f'API 错误: {", ".join(error_indicators[:3])}'
+            if msg:
+                result['evidence'] += f' — {msg[:80]}'
+            result['suggested_fix'] = '尝试添加 @Header:{Referer:...} 或检查 API 参数'
+            return result
+
+        return result
+
+    # ── 路径 C: str → 原始文本 ──
+    if isinstance(data, str):
+        text_lower = data.lower()[:3000]
+        if 'captcha' in text_lower or '验证码' in text_lower:
+            result['blocked'] = True
+            result['block_type'] = 'captcha'
+            result['evidence'] = '文本含验证码关键词'
+            result['suggested_fix'] = '无法自动绕过'
+        elif not data.strip():
+            result['blocked'] = True
+            result['block_type'] = 'empty_body'
+            result['evidence'] = '响应文本为空'
+            result['suggested_fix'] = '检查 URL 是否正确，或添加 Referer'
+        return result
+
+    # ── 路径 D: list → JSON 数组 ──
+    if isinstance(data, list):
+        if len(data) == 0:
+            result['blocked'] = True
+            result['block_type'] = 'empty_body'
+            result['evidence'] = 'API 返回空数组 []'
+            result['suggested_fix'] = '可能源配置有误或 API 参数不对'
+        return result
+
+    return result

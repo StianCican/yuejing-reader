@@ -1,9 +1,86 @@
 /* ════════════════════════════════════════════════════════════════
-   app.js — 全局状态、导航、搜索、详情、源管理
+   app.js — Alpine 全局状态、导航、搜索、详情、源管理、Toast
    ════════════════════════════════════════════════════════════════ */
 
-// ── 集中状态 ──
 const S = localStorage;
+let toastId = 0;
+
+// ── Alpine 全局状态 ──
+document.addEventListener('alpine:init', () => {
+  Alpine.data('appState', () => ({
+    currentView: 'home',
+    sidebarOpen: false,
+    sidebarTab: 'shelf',
+    settingsOpen: false,
+    toasts: [],
+
+    // 当前阅读上下文（由 reader.js/shelf.js 使用）
+    get currentBook() { return window.State?.currentBook; },
+    get chapters() { return window.State?.chapters || []; },
+    get currentChapterIdx() { return window.State?.currentChapterIdx ?? -1; },
+
+    init() {
+      window._alpine = this;
+      loadShelf();
+      loadSources();
+      loadProgress();
+      applyReadingSettings();
+      setupEventDelegation();
+      setupTopbarScroll();
+      setupRippleEffect();
+      setupBookCardTilt();
+    },
+
+    // ── Navigation ──
+    showHome() {
+      this.currentView = 'home';
+      renderHomeShelf();
+    },
+    showView(id) {
+      State.currentView = id;
+      this.currentView = id;
+      if (id !== 'reader') {
+        document.querySelectorAll('.diagnostics-trigger,.diagnostics-panel').forEach(d => d.remove());
+      }
+    },
+    showDetail() {
+      if (State.currentBook) this.currentView = 'detail';
+    },
+    goBack() {
+      if (this.currentView === 'reader') this.showDetail();
+      else if (this.currentView === 'detail') this.currentView = 'search';
+      else if (this.currentView === 'search') this.showHome();
+      else this.showHome();
+    },
+
+    // ── Search ──
+    setSearchType(t, el) {
+      State.currentSearchType = t;
+      document.querySelectorAll('.type-tab').forEach(b => b.classList.remove('active'));
+      if (el) el.classList.add('active');
+      const kw = document.getElementById('searchInput').value.trim();
+      if (kw) window.doSearch();
+    },
+    doSearch() { window.doSearch(); },
+    quickSearch(tag) {
+      document.getElementById('searchInput').value = tag;
+      window.doSearch();
+    },
+
+    // ── Reader helpers ──
+    navChapter(dir) { window.navChapter(dir); },
+    openSettings() { this.settingsOpen = true; },
+    closeSettings() { this.settingsOpen = false; },
+
+    // ── Settings hooks（delegate to settings.js）──
+    setFontSize(v) { window._setFontSize(v); },
+    setLineHeight(v) { window._setLineHeight(v); },
+    setFontFamily(ff, el) { window._setFontFamily(ff, el); },
+    setTheme(t) { window._setTheme(t); },
+  }));
+});
+
+// ── Legacy State（向后兼容 reader/shelf/comic_reader/settings）──
 const State = {
   currentView: 'home',
   currentBook: null,
@@ -12,16 +89,14 @@ const State = {
   shelf: [],
   sources: [],
   readingProgress: {},
-  searchResults: [],   // 搜索结果缓存（供事件委托使用）
+  searchResults: [],
   currentSearchType: '',
 };
 
 // ── 图片代理 ──
 function proxyUrl(url, referer) {
   if (!url) return url;
-  // 归一化：协议相对 → https
   if (url.startsWith('//')) url = 'https:' + url;
-  // 非 HTTP 或本站资源不代理
   if (!url.startsWith('http')) return url;
   if (url.startsWith(window.location.origin)) return url;
   let proxy = '/api/proxy?url=' + encodeURIComponent(url);
@@ -29,7 +104,7 @@ function proxyUrl(url, referer) {
   return proxy;
 }
 
-// ── 阅读进度存储 ──
+// ── 阅读进度 ──
 function getBookKey(b) {
   return b.source_url + '|' + b.book_url;
 }
@@ -40,8 +115,6 @@ function saveProgress(bookKey, chapterIdx, totalChapters) {
   State.readingProgress[bookKey] = totalChapters ? { chapter: chapterIdx, total: totalChapters } : chapterIdx;
   S.setItem('readingProgress', JSON.stringify(State.readingProgress));
 }
-
-// ── 滚动位置 ──
 function saveScrollPos(bookKey) {
   const el = document.getElementById('content');
   if (el) {
@@ -64,81 +137,108 @@ function restoreScrollPos(bookKey) {
   } catch(e) {}
 }
 
-// ── Init ──
-window.addEventListener('load', () => {
-  loadShelf();
-  loadSources();
-  loadProgress();
-  applyReadingSettings();
-  setupEventDelegation();
-});
+// ── Topbar 滚动毛玻璃 ──
+function setupTopbarScroll() {
+  const content = document.getElementById('content');
+  const topbar = document.getElementById('topbar');
+  if (!content || !topbar) return;
+  content.addEventListener('scroll', () => {
+    topbar.classList.toggle('scrolled', content.scrollTop > 20);
+  }, { passive: true });
+}
+
+// ── 按钮涟漪效果 ──
+function setupRippleEffect() {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn, button:not([x-data])');
+    if (!btn || btn.querySelector('.ripple')) return;
+    const ripple = document.createElement('span');
+    ripple.className = 'ripple';
+    const rect = btn.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+    ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+    btn.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+  });
+}
+
+// ── 书卡 3D tilt ──
+function setupBookCardTilt() {
+  document.addEventListener('mouseover', (e) => {
+    const card = e.target.closest('.book-card');
+    if (!card) return;
+    card.classList.add('tilt-active');
+  });
+  document.addEventListener('mouseout', (e) => {
+    const card = e.target.closest('.book-card');
+    if (!card) return;
+    card.classList.remove('tilt-active');
+    card.style.transform = '';
+  });
+  document.addEventListener('mousemove', (e) => {
+    const card = e.target.closest('.book-card.tilt-active');
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    card.style.transform = `perspective(800px) rotateX(${-y * 6}deg) rotateY(${x * 8}deg) translateY(-4px)`;
+  });
+}
 
 // ── 事件委托 ──
 function setupEventDelegation() {
-  // 搜索结果/书架 点击事件委托
   document.getElementById('searchResults').addEventListener('click', (e) => {
     const card = e.target.closest('.book-card');
     if (!card) return;
     const idx = parseInt(card.dataset.index);
-    if (!isNaN(idx) && State.searchResults[idx]) {
-      openBook(State.searchResults[idx]);
-    }
+    if (!isNaN(idx) && State.searchResults[idx]) openBook(State.searchResults[idx]);
   });
   document.getElementById('homeShelf').addEventListener('click', (e) => {
     const card = e.target.closest('.book-card');
     if (!card) return;
     const idx = parseInt(card.dataset.index);
-    if (!isNaN(idx) && State.shelf[idx]) {
-      openBook(State.shelf[idx]);
-    }
+    if (!isNaN(idx) && State.shelf[idx]) openBook(State.shelf[idx]);
   });
 }
 
-// ── Navigation ──
+// ── View helpers ──
 function showView(id) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  const el = document.getElementById(id + 'View');
-  if (el) el.classList.add('active');
   State.currentView = id;
+  const alpine = window._alpine;
+  if (alpine) {
+    alpine.currentView = id;
+  } else {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const el = document.getElementById(id + 'View');
+    if (el) el.classList.add('active');
+  }
 }
-
 function showHome() {
   showView('home');
   renderHomeShelf();
 }
-
 function showDetail() {
   if (State.currentBook) showView('detail');
 }
-
 function goBack() {
-  if (State.currentView === 'reader') {
-    showDetail();
-  } else if (State.currentView === 'detail') {
-    showView('search');
-  } else if (State.currentView === 'search') {
-    showHome();
+  const alpine = window._alpine;
+  if (alpine) {
+    alpine.goBack();
   } else {
-    showHome();
+    if (State.currentView === 'reader') showDetail();
+    else if (State.currentView === 'detail') showView('search');
+    else showHome();
   }
-}
-
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('show');
-}
-
-function switchTab(tab, e) {
-  document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
-  (e || window.event).target.classList.add('active');
-  document.getElementById('shelfPanel').style.display = tab === 'shelf' ? '' : 'none';
-  document.getElementById('sourcesPanel').style.display = tab === 'sources' ? '' : 'none';
 }
 
 // ── Search ──
 function setSearchType(t, e) {
   State.currentSearchType = t;
   document.querySelectorAll('.type-tab').forEach(b => b.classList.remove('active'));
-  if (e && e.target) e.target.classList.add('active');
+  const el = (e && e.target) ? e.target : e;
+  if (el && el.classList) el.classList.add('active');
   const kw = document.getElementById('searchInput').value.trim();
   if (kw) doSearch();
 }
@@ -149,14 +249,7 @@ async function doSearch() {
   showView('search');
   document.getElementById('resultCount').textContent = '搜索中...';
   document.getElementById('searchResults').innerHTML = Array(4).fill(0).map(() =>
-    `<div class="skeleton-card">
-      <div class="skeleton-cover"></div>
-      <div class="skeleton-lines">
-        <div class="skeleton-line w-60"></div>
-        <div class="skeleton-line w-40"></div>
-        <div class="skeleton-line w-80"></div>
-      </div>
-    </div>`
+    `<div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-lines"><div class="skeleton-line w-60"></div><div class="skeleton-line w-40"></div><div class="skeleton-line w-80"></div></div></div>`
   ).join('');
   try {
     let url = `/api/search?q=${encodeURIComponent(kw)}`;
@@ -170,18 +263,18 @@ async function doSearch() {
   }
 }
 
-function quickSearch(tag) {
-  document.getElementById('searchInput').value = tag;
-  doSearch();
-}
-
 function renderSearchResults(results) {
   const el = document.getElementById('searchResults');
   if (!results.length) {
     el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>没有找到相关书籍</p></div>';
     return;
   }
-  el.innerHTML = results.map((b, i) => bookCard(b, i)).join('');
+  // JS 动态设置 animation-delay（替代手写 n 个 nth-child）
+  const cards = results.map((b, i) => bookCard(b, i)).join('');
+  el.innerHTML = cards;
+  el.querySelectorAll('.book-card').forEach((card, i) => {
+    card.style.animationDelay = (i * 0.04) + 's';
+  });
 }
 
 function bookCard(b, i) {
@@ -203,6 +296,14 @@ function bookCard(b, i) {
 // ── Book Detail ──
 async function openBook(b) {
   State.currentBook = b;
+  if (!b.book_url || !b.book_url.trim()) {
+    document.getElementById('detailHeader').innerHTML = `
+      <div class="cover"><div class="placeholder">📕</div></div>
+      <div class="info"><div class="name">${esc(b.name)}</div><div class="author">✍ ${esc(b.author||'未知')}</div></div>`;
+    document.getElementById('chapterList').innerHTML = '';
+    showView('detail');
+    return;
+  }
   showView('loading');
   document.getElementById('loadingText').textContent = '正在加载详情...';
   try {
@@ -219,7 +320,7 @@ async function openBook(b) {
     renderDetail();
     showView('detail');
   } catch (e) {
-    toast('加载详情失败：' + e.message);
+    showToast('加载详情失败：' + e.message, 'error');
     showView('search');
   }
 }
@@ -248,7 +349,33 @@ function renderDetail() {
     ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? '📖 继续阅读（第'+(savedIdx+1)+'章）' : '📖 开始阅读'}</button>` : ''}
     <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? '💔 取消收藏' : '❤️ 加入书架'}</button>`;
   document.getElementById('chapterCount').textContent = `📑 章节目录（${State.chapters.length} 章）`;
-  document.getElementById('chapterList').innerHTML = State.chapters.map((ch, i) => {
+  let diagHtml = '';
+  if (b.source_type === 2 && !State.chapters.length && b.diagnostics) {
+    const d = b.diagnostics;
+    diagHtml = '<div class="detail-diag-warning">';
+    diagHtml += '<div class="detail-diag-title">⚠ 诊断：该漫画源未返回章节</div>';
+    (d.warnings || []).forEach(w => { diagHtml += '<div class="detail-diag-item">' + esc(w) + '</div>'; });
+    if (d.fetch_ok !== undefined) {
+      diagHtml += '<div class="detail-diag-tech">';
+      diagHtml += '<div class="diag-tech-row"><span>请求状态</span><b class="' + (d.fetch_ok ? 'ok' : 'fail') + '">' + (d.fetch_ok ? '✓ 成功' : (d.fetch_error ? '✗ ' + esc(d.fetch_error) : '✗ 失败')) + '</b></div>';
+      diagHtml += '<div class="diag-tech-row"><span>响应类型</span><b>' + esc(d.data_type || '?') + '</b></div>';
+      if (d.chapter_list_rule) diagHtml += '<div class="diag-tech-row"><span>章节规则</span><code>' + esc(d.chapter_list_rule) + '</code></div>';
+      diagHtml += '<div class="diag-tech-row"><span>规则匹配</span><b class="' + (d.rule_match ? 'ok' : 'fail') + '">' + (d.rule_match ? '✓ 是' : '✗ 否（规则未匹配到章节）') + '</b></div>';
+      if (d.data_sample) diagHtml += '<div class="diag-tech-sample"><span>响应样本</span><pre>' + esc(d.data_sample) + '</pre></div>';
+      diagHtml += '</div>';
+    }
+    if (d.anti_bot) {
+      const ab = d.anti_bot;
+      diagHtml += '<div class="detail-diag-antibot">';
+      diagHtml += '<div class="diag-tech-row"><span>🛡 拦截类型</span><b class="fail">' + esc(ab.block_type || '') + '</b></div>';
+      diagHtml += '<div class="diag-tech-row"><span>证据</span><span class="dim">' + esc(ab.evidence || '') + '</span></div>';
+      if (ab.suggested_fix) diagHtml += '<div class="diag-tech-row"><span>💡 建议</span><span>' + esc(ab.suggested_fix) + '</span></div>';
+      diagHtml += '</div>';
+    }
+    diagHtml += '<div class="detail-diag-meta">源：' + esc(d.source_name || '') + ' | 分组：' + esc(d.source_group || '') + '</div>';
+    diagHtml += '</div>';
+  }
+  document.getElementById('chapterList').innerHTML = diagHtml + State.chapters.map((ch, i) => {
     const isCurrent = hasProgress && i === savedIdx;
     const isRead = hasProgress && i < savedIdx;
     let cls = 'chapter-item';
@@ -276,14 +403,12 @@ function renderSources() {
   const partialCount = State.sources.filter(s => s.status === 'partial').length;
   const deadCount = State.sources.filter(s => s.status === 'dead').length;
   const untested = State.sources.filter(s => !s.status).length;
-
   let statusHtml = `${enabled}/${total} 源已启用`;
   if (okCount > 0) statusHtml += ` · <span style="color:var(--green)">${okCount} 可用</span>`;
   if (partialCount > 0) statusHtml += ` · <span style="color:var(--amber)">${partialCount} 部分</span>`;
   if (deadCount > 0) statusHtml += ` · <span style="color:var(--red)">${deadCount} 失效</span>`;
   if (untested > 0) statusHtml += ` · <span style="color:var(--muted)">${untested} 未测</span>`;
   document.getElementById('sourceCount').innerHTML = statusHtml;
-
   const el = document.getElementById('sourcesPanel');
   const groups = {};
   State.sources.forEach(s => {
@@ -305,8 +430,7 @@ function renderSources() {
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
     html += list.map(s => {
-      let dot = 'unknown';
-      let title = '未检测';
+      let dot = 'unknown'; let title = '未检测';
       if (s.status === 'ok')      { dot = 'on';  title = '可用：搜索有结果'; }
       else if (s.status === 'partial') { dot = 'partial'; title = '部分：域名通但搜索状态不明'; }
       else if (s.status === 'dead')  { dot = 'off'; title = '失效：域名不可达'; }
@@ -327,16 +451,16 @@ let healthCheckRunning = false;
 async function runHealthCheck() {
   if (healthCheckRunning) return;
   healthCheckRunning = true;
-  toast('🔍 阶段1：检测域名连通性...');
+  showToast('🔍 阶段1：检测域名连通性...', 'info');
   try {
     await fetch('/api/health_check', { method: 'POST' });
     await new Promise(r => setTimeout(r, 5000));
     await loadSources();
-    toast('🔍 阶段2：测试搜索能力...');
+    showToast('🔍 阶段2：测试搜索能力...', 'info');
     await new Promise(r => setTimeout(r, 15000));
     await loadSources();
-    toast('✅ 检测完成——查看源列表状态点');
-  } catch(e) { toast('检测失败'); }
+    showToast('✅ 检测完成——查看源列表状态点', 'success');
+  } catch(e) { showToast('检测失败', 'error'); }
   healthCheckRunning = false;
 }
 
@@ -348,10 +472,9 @@ async function toggleSource(url) {
     });
     await loadSources();
     filterSources();
-  } catch (e) { toast('操作失败'); }
+  } catch (e) { showToast('操作失败', 'error'); }
 }
 
-// ── 源筛选 ──
 function filterSources() {
   const q = (document.getElementById('sourceFilterInput')?.value || '').toLowerCase();
   document.querySelectorAll('#sourcesPanel .source-item').forEach(el => {
@@ -369,7 +492,6 @@ function filterSources() {
   });
 }
 
-// ── 源标记 ──
 async function flagSource(url) {
   const notes = prompt('标记备注（可选，留空仅切换标记状态）：');
   if (notes === null) return;
@@ -381,8 +503,8 @@ async function flagSource(url) {
     const data = await resp.json();
     await loadSources();
     filterSources();
-    toast(data.flagged ? '🚩 已标记' : '✅ 已取消标记');
-  } catch(e) { toast('操作失败'); }
+    showToast(data.flagged ? '🚩 已标记' : '✅ 已取消标记', 'success');
+  } catch(e) { showToast('操作失败', 'error'); }
 }
 
 function filterFlagged() {
@@ -402,10 +524,9 @@ function filterFlagged() {
   filterSources();
 }
 
-// ── 批量禁用失效源 ──
 async function batchDisableDead() {
   const deadSources = State.sources.filter(s => s.status === 'dead' && s.enabled);
-  if (!deadSources.length) { toast('没有可禁用的失效源'); return; }
+  if (!deadSources.length) { showToast('没有可禁用的失效源', 'info'); return; }
   if (!confirm(`确定要禁用 ${deadSources.length} 个失效源吗？`)) return;
   let count = 0;
   for (const s of deadSources) {
@@ -419,7 +540,7 @@ async function batchDisableDead() {
   }
   await loadSources();
   filterSources();
-  toast(`✅ 已禁用 ${count} 个失效源`);
+  showToast(`✅ 已禁用 ${count} 个失效源`, 'success');
 }
 
 // ── Utils ──
@@ -429,9 +550,30 @@ function esc(s) {
   return d.innerHTML;
 }
 
-function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
+// ── Toast（Alpine 管理）──
+function showToast(message, type) {
+  type = type || 'info';
+  const icons = { success: '✅', error: '❌', info: 'ℹ️' };
+  const alpine = window._alpine;
+  if (!alpine) {
+    // Fallback: legacy toast
+    const el = document.getElementById('toast');
+    if (el) { el.textContent = message; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2500); }
+    return;
+  }
+  const id = ++toastId;
+  alpine.toasts.push({ id, message, type, icon: icons[type] || icons.info, show: true });
+  setTimeout(() => {
+    const idx = alpine.toasts.findIndex(t => t.id === id);
+    if (idx > -1) {
+      alpine.toasts[idx].show = false;
+      setTimeout(() => {
+        const idx2 = alpine.toasts.findIndex(t => t.id === id);
+        if (idx2 > -1) alpine.toasts.splice(idx2, 1);
+      }, 300);
+    }
+  }, 3000);
 }
+
+// Legacy compatibility
+function toast(msg) { showToast(msg, 'info'); }

@@ -3,59 +3,74 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="阅境——跨书源小说聚合阅读器，支持搜索、收藏、文本与漫画阅读，东方美学界面">
 <title>阅境 · 小说阅读器</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@300;400;500;700&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/style.css">
+<!-- Motion One import map -->
+<script type="importmap">
+{ "imports": { "motion": "https://cdn.jsdelivr.net/npm/motion@11/+esm" } }
+</script>
+<!-- Alpine.js -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 </head>
-<body>
+<body x-data="appState" @keydown.escape="closeSettings()">
+
 <div class="app">
   <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar" :class="{ 'show': sidebarOpen }">
     <div class="sidebar-header">
       <h1>阅 · 境</h1>
       <p id="sourceCount">加载中...</p>
     </div>
     <nav class="sidebar-nav">
-      <button class="active" onclick="switchTab('shelf',event)">📖 书架</button>
-      <button onclick="switchTab('sources',event)">⚙ 源管理</button>
+      <button :class="{ 'active': sidebarTab === 'shelf' }" @click="sidebarTab = 'shelf'" aria-label="书架">📖 书架</button>
+      <button :class="{ 'active': sidebarTab === 'sources' }" @click="sidebarTab = 'sources'" aria-label="源管理">⚙ 源管理</button>
     </nav>
     <div class="sidebar-content">
-      <div id="shelfPanel" class="sidebar-section"></div>
-      <div id="sourcesPanel" class="sidebar-section" style="display:none"></div>
+      <div id="shelfPanel" class="sidebar-section" x-show="sidebarTab === 'shelf'"></div>
+      <div id="sourcesPanel" class="sidebar-section" x-show="sidebarTab === 'sources'"></div>
     </div>
   </aside>
 
   <!-- Main -->
-  <div class="main">
-    <div class="topbar">
-      <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+  <main class="main">
+    <div class="topbar" id="topbar">
+      <button class="menu-btn" @click="sidebarOpen = !sidebarOpen" aria-label="菜单">☰</button>
       <div class="search-box">
         <span class="icon">🔍</span>
-        <input type="text" id="searchInput" placeholder="搜索小说..." onkeydown="if(event.key==='Enter')doSearch()">
+        <input type="search" id="searchInput" placeholder="搜索小说..." @keydown.enter="doSearch()" aria-label="搜索小说">
       </div>
       <div class="nav-btns">
-        <button onclick="showHome()">首页</button>
-        <button onclick="goBack()">← 返回</button>
+        <button @click="showHome()">首页</button>
+        <button @click="goBack()">← 返回</button>
       </div>
     </div>
 
     <div class="content" id="content">
       <!-- Home -->
-      <div id="homeView" class="view active">
-        <div class="hero">
+      <div id="homeView" class="view active" x-show="currentView === 'home'"
+        x-transition:enter="view-enter-active"
+        x-transition:enter-start="view-enter-from"
+        x-transition:enter-end="view-enter-to"
+        x-transition:leave="view-leave-active"
+        x-transition:leave-start="view-leave-from"
+        x-transition:leave-end="view-leave-to">
+        <div class="hero" id="heroArea">
           <h2 class="hero-title">阅 · 境</h2>
           <p class="hero-subtitle">展开书卷，遇见另一个世界</p>
           <div class="hero-search">
-            <input type="text" placeholder="搜索书名、作者..." onkeydown="if(event.key==='Enter'){document.getElementById('searchInput').value=this.value;doSearch()}">
+            <input type="search" placeholder="搜索书名、作者..." @keydown.enter="quickSearch($el.value)" aria-label="搜索书名作者">
           </div>
           <div class="hero-tags">
-            <span onclick="quickSearch('玄幻')">玄幻</span>
-            <span onclick="quickSearch('言情')">言情</span>
-            <span onclick="quickSearch('都市')">都市</span>
-            <span onclick="quickSearch('科幻')">科幻</span>
-            <span onclick="quickSearch('历史')">历史</span>
+            <span @click="quickSearch('玄幻')">玄幻</span>
+            <span @click="quickSearch('言情')">言情</span>
+            <span @click="quickSearch('都市')">都市</span>
+            <span @click="quickSearch('科幻')">科幻</span>
+            <span @click="quickSearch('历史')">历史</span>
           </div>
         </div>
         <div class="section-title">🔥 书架收藏</div>
@@ -63,18 +78,30 @@
       </div>
 
       <!-- Search Results -->
-      <div id="searchView" class="view">
+      <div id="searchView" class="view" x-show="currentView === 'search'"
+        x-transition:enter="view-enter-active"
+        x-transition:enter-start="view-enter-from"
+        x-transition:enter-end="view-enter-to"
+        x-transition:leave="view-leave-active"
+        x-transition:leave-start="view-leave-from"
+        x-transition:leave-end="view-leave-to">
         <div class="type-tabs" id="typeTabs">
-          <button class="type-tab active" data-type="" onclick="setSearchType('', event)">全部</button>
-          <button class="type-tab" data-type="0" onclick="setSearchType('0', event)">📖 小说</button>
-          <button class="type-tab" data-type="2" onclick="setSearchType('2', event)">🎨 漫画</button>
+          <button class="type-tab active" data-type="" @click="setSearchType('', $el)">全部</button>
+          <button class="type-tab" data-type="0" @click="setSearchType('0', $el)">📖 小说</button>
+          <button class="type-tab" data-type="2" @click="setSearchType('2', $el)">🎨 漫画</button>
         </div>
         <div class="section-title">搜索结果 <span class="count" id="resultCount"></span></div>
         <div id="searchResults" class="book-grid"></div>
       </div>
 
       <!-- Book Detail -->
-      <div id="detailView" class="view">
+      <div id="detailView" class="view" x-show="currentView === 'detail'"
+        x-transition:enter="view-enter-active"
+        x-transition:enter-start="view-enter-from"
+        x-transition:enter-end="view-enter-to"
+        x-transition:leave="view-leave-active"
+        x-transition:leave-start="view-leave-from"
+        x-transition:leave-end="view-leave-to">
         <div class="detail-header" id="detailHeader"></div>
         <div class="detail-actions" id="detailActions"></div>
         <div class="chapter-count" id="chapterCount"></div>
@@ -82,61 +109,111 @@
       </div>
 
       <!-- Reader -->
-      <div id="readerView" class="view">
+      <div id="readerView" class="view" x-show="currentView === 'reader'"
+        x-transition:enter="view-enter-active"
+        x-transition:enter-start="view-enter-from"
+        x-transition:enter-end="view-enter-to"
+        x-transition:leave="view-leave-active"
+        x-transition:leave-start="view-leave-from"
+        x-transition:leave-end="view-leave-to">
         <div class="reader-progress"><div class="reader-progress-fill" id="progressFill"></div></div>
+        <div class="reader-progress-pct" id="progressPct"></div>
         <div class="reader-wrap">
           <div class="reader-nav">
-            <button class="btn btn-outline" id="prevChapter" onclick="navChapter(-1)">← 上一章</button>
+            <button class="btn btn-outline" id="prevChapter" @click="navChapter(-1)" aria-label="上一章">← 上一章</button>
             <span class="title" id="chapterTitle"></span>
-            <button class="btn btn-outline" id="nextChapter" onclick="navChapter(1)">下一章 →</button>
+            <button class="btn btn-outline" id="nextChapter" @click="navChapter(1)" aria-label="下一章">下一章 →</button>
           </div>
-          <div class="reader-content" id="readerContent"></div>
+          <div class="reader-content" id="readerContent" @dblclick="openSettings()"></div>
+          <div class="chapter-done" id="chapterDone"><span class="check">✓</span>本章已读完</div>
           <div class="reader-bottom">
-            <button class="btn btn-outline" id="prevChapterBottom" onclick="navChapter(-1)">← 上一章</button>
-            <button class="btn btn-outline" onclick="showDetail()">📑 返回目录</button>
-            <button class="btn btn-outline" id="nextChapterBottom" onclick="navChapter(1)">下一章 →</button>
+            <button class="btn btn-outline" @click="navChapter(-1)" aria-label="上一章">← 上一章</button>
+            <button class="btn btn-outline" @click="showDetail()">📑 返回目录</button>
+            <button class="btn btn-outline" @click="navChapter(1)" aria-label="下一章">下一章 →</button>
           </div>
         </div>
       </div>
 
       <!-- Loading -->
-      <div id="loadingView" class="view">
+      <div id="loadingView" class="view" x-show="currentView === 'loading'"
+        x-transition:enter="view-enter-active"
+        x-transition:enter-start="view-enter-from"
+        x-transition:enter-end="view-enter-to"
+        x-transition:leave="view-leave-active"
+        x-transition:leave-start="view-leave-from"
+        x-transition:leave-end="view-leave-to">
         <div class="loading"><div class="spinner"></div><p id="loadingText">正在搜索...</p></div>
       </div>
     </div>
-  </div>
+  </main>
 </div>
 
-<!-- Settings Panel (bottom slide-up) -->
-<div class="settings-panel" id="settingsPanel">
+<!-- Settings Panel (glass bottom sheet) -->
+<div class="settings-panel" id="settingsPanel"
+  x-show="settingsOpen"
+  x-transition:enter="slide-enter-active"
+  x-transition:enter-start="slide-enter-from"
+  x-transition:enter-end="slide-enter-to"
+  x-transition:leave="slide-leave-active"
+  x-transition:leave-start="slide-leave-from"
+  x-transition:leave-end="slide-leave-to"
+  style="display:none"
+>
   <div class="handle"></div>
   <h3>⚙ 阅读设置</h3>
-  <label>字号：<span id="fontSizeVal">18</span>px</label>
-  <input type="range" min="14" max="28" value="18" oninput="setFontSize(this.value)">
-  <label>行高：<span id="lineHeightVal">2.0</span></label>
-  <input type="range" min="14" max="30" value="20" oninput="setLineHeight(this.value)">
-  <label>字体</label>
-  <div class="font-btns theme-btns">
-    <button data-font="serif" class="active" onclick="setFontFamily('serif')">衬线</button>
-    <button data-font="sans" onclick="setFontFamily('sans')">无衬线</button>
-    <button data-font="kai" onclick="setFontFamily('kai')">楷体</button>
+  <label for="fontSizeRange">字号：<span id="fontSizeVal">18</span>px</label>
+  <input type="range" id="fontSizeRange" min="14" max="28" value="18" @input="setFontSize($el.value)" aria-label="字号调节">
+  <label for="lineHeightRange">行高：<span id="lineHeightVal">2.0</span></label>
+  <input type="range" id="lineHeightRange" min="14" max="30" value="20" @input="setLineHeight($el.value)" aria-label="行高调节">
+  <label for="fontBtns">字体</label>
+  <div class="font-btns theme-btns" id="fontBtns">
+    <button data-font="serif" class="active" @click="setFontFamily('serif', $el)">衬线</button>
+    <button data-font="sans" @click="setFontFamily('sans', $el)">无衬线</button>
+    <button data-font="kai" @click="setFontFamily('kai', $el)">楷体</button>
   </div>
   <label>主题</label>
   <div class="theme-btns">
-    <button onclick="setTheme('')" style="background:#f7f5f0;color:#2c2416">宣纸</button>
-    <button onclick="setTheme('sepia')" style="background:#e8e0cc;color:#3d3528">青绿</button>
-    <button onclick="setTheme('dark')" style="background:#1a1814;color:#e8e4de">墨韵</button>
+    <button @click="setTheme('')" style="background:#f7f5f0;color:#2c2416">宣纸</button>
+    <button @click="setTheme('sepia')" style="background:#e8e0cc;color:#3d3528">青绿</button>
+    <button @click="setTheme('dark')" style="background:#1a1814;color:#e8e4de">墨韵</button>
   </div>
-  <button class="btn btn-outline" style="width:100%;margin-top:12px" onclick="closeSettings()">关闭</button>
+  <button class="btn btn-outline" style="width:100%;margin-top:12px" @click="closeSettings()">关闭</button>
 </div>
 
-<!-- Overlay for settings panel -->
-<div class="settings-overlay" id="settingsOverlay" onclick="closeSettings()"></div>
+<!-- Settings overlay -->
+<div class="settings-overlay" id="settingsOverlay"
+  x-show="settingsOpen"
+  x-transition:enter="fade-enter-active"
+  x-transition:enter-start="fade-enter-from"
+  x-transition:enter-end="fade-enter-to"
+  x-transition:leave="fade-leave-active"
+  x-transition:leave-start="fade-leave-from"
+  x-transition:leave-end="fade-leave-to"
+  style="display:none"
+  @click="closeSettings()"
+></div>
 
-<!-- Toast -->
-<div class="toast" id="toast"></div>
+<!-- Toast container (Alpine-managed) -->
+<div class="toast-container" id="toastContainer">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast-item" :class="t.type"
+      x-show="t.show"
+      x-transition:enter="toast-enter-active"
+      x-transition:enter-start="toast-enter-from"
+      x-transition:enter-end="toast-enter-to"
+      x-transition:leave="toast-leave-active"
+      x-transition:leave-start="toast-leave-from"
+      x-transition:leave-end="toast-leave-to"
+    >
+      <span class="toast-icon" x-text="t.icon"></span>
+      <span x-text="t.message"></span>
+    </div>
+  </template>
+</div>
 
-<!-- Scripts: order matters — app defines globals, others extend them -->
+<!-- Scripts: app defines Alpine state + globals, others extend -->
+<script src="/static/js/motion-import.js" type="module"></script>
+<script src="/static/js/ink-bg.js"></script>
 <script src="/static/js/app.js"></script>
 <script src="/static/js/reader.js"></script>
 <script src="/static/js/comic_reader.js"></script>
