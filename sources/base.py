@@ -523,7 +523,13 @@ def _fetch_chapter_images(source, ch_url, max_pages=10):
     http_base = source.http_base
     source_name = getattr(source, 'name', '未知')
 
-    # 多页收集
+    # 无多页配置 → 直接单页提取，保持原始行为
+    if not next_rule:
+        return _extract_single_page_images(
+            source, ch_url, cr, content_rule, http_base, source_name
+        )
+
+    # ── 多页追踪（有 nextContentUrl 配置时）──
     all_img_urls = []
     all_diagnostics_pages = []
     visited = set()
@@ -786,8 +792,11 @@ def _extract_single_page_images(source, url, cr, content_rule, http_base, source
                 if '<img' in raw_text:
                     soup = BeautifulSoup(raw_text, 'lxml')
                     img_urls = _extract_images_from_soup(soup, '', base_url)
-                if not img_urls:
-                    img_urls = _extract_images_from_text(raw_text, http_base)
+                # 始终追加上下文中的裸 URL（JS 解码的图片可能在变量中而不在 img 标签里）
+                text_urls = _extract_images_from_text(raw_text, http_base)
+                for u in text_urls:
+                    if u not in img_urls:
+                        img_urls.append(u)
         if img_urls:
             return _finalize(img_urls, 1, 'content_rule', data_type)
 

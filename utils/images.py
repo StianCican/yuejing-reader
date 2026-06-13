@@ -247,15 +247,16 @@ def _extract_images_from_text(text, base_url=''):
     if not text:
         return []
     urls = []
-    # <img src="..."> 标签
-    for m in re.finditer(r'<img[^>]+(?:src|data-src|data-original)\s*=\s*["\']([^"\']+)["\']', text, re.IGNORECASE):
+    # <img src="..."> 标签（含更多 lazy-load 属性）
+    for m in re.finditer(r'<img[^>]+(?:src|data-src|data-original|data-url|data-lazy-src)\s*=\s*["\']([^"\']+)["\']', text, re.IGNORECASE):
         url = m.group(1).strip()
         if url and not url.startswith('data:'):
             urls.append(url)
-    # 直接的图片URL（无img标签）
-    if not urls:
-        for m in re.finditer(r'https?://[^\s"\'<>]+\.(?:jpg|jpeg|png|webp|gif|bmp)(?:\?[^\s"\'<>]*)?', text, re.IGNORECASE):
-            urls.append(m.group(0))
+    # 直接的图片URL（无img标签）—— 也作为 img 标签提取的补充
+    for m in re.finditer(r'https?://[^\s"\'<>]+\.(?:jpg|jpeg|png|webp|gif|bmp)(?:/[a-zA-Z0-9]*)?(?:\?[^\s"\'<>]*)?', text, re.IGNORECASE):
+        u = m.group(0)
+        if u not in urls:
+            urls.append(u)
     # 归一化为绝对URL
     out = []
     for u in urls:
