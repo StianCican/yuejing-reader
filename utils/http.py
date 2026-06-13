@@ -269,6 +269,22 @@ def inspect_anti_bot(data, content_rule='', url=''):
                 result['suggested_fix'] = '需配置源登录信息（loginUrl / header 中加 Cookie）'
                 return result
 
+        # 会员/付费墙
+        vip_keywords = [
+            '付费', '购买', '充值', '订阅', '会员', 'vip', '开通',
+            'buy', 'pay', 'purchase', 'subscribe', 'premium',
+            '付费章节', '付费漫画', 'vip章节', 'vip漫画', '付费阅读',
+            '余额不足', '立即购买', '解锁', '本章为付费', '付费后可阅读',
+            '成为会员', '开通会员', '续费', '点此购买',
+        ]
+        for kw in vip_keywords:
+            if kw.lower() in text_lower:
+                result['blocked'] = True
+                result['block_type'] = 'paywall'
+                result['evidence'] = f'页面含付费/会员关键词: "{kw}"'
+                result['suggested_fix'] = '该章节需付费/会员，无法绕过。建议换一个书源重试'
+                return result
+
         # 频率限制（HTML 页面中）
         rate_keywords = [
             '访问过于频繁', 'too frequent', 'rate limit', '请求过于频繁',
@@ -343,6 +359,19 @@ def inspect_anti_bot(data, content_rule='', url=''):
                     result['block_type'] = 'login_wall'
                     result['evidence'] = f'API 返回: {msg[:120]}'
                     result['suggested_fix'] = '需配置源登录 Cookie/Token'
+                    return result
+
+            # 会员/付费
+            vip_msg_keywords = [
+                '付费', '购买', '会员', 'vip', '订阅', '充值',
+                'buy', 'pay', 'premium', 'subscribe', '余额',
+            ]
+            for kw in vip_msg_keywords:
+                if kw.lower() in msg_lower:
+                    result['blocked'] = True
+                    result['block_type'] = 'paywall'
+                    result['evidence'] = f'API 返回付费/会员提示: {msg[:120]}'
+                    result['suggested_fix'] = '该章节需付费/会员，无法绕过。建议换书源'
                     return result
 
         if error_indicators:

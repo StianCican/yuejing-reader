@@ -842,7 +842,7 @@ def _extract_single_page_images(source, url, cr, content_rule, http_base, source
         bt = anti_bot.get('block_type', '')
         retry_url = _join_url(http_base, url)
 
-        # 判断是否值得重试
+        # 判断是否值得重试（paywall 不重试——付费墙换了 UA 也没用）
         can_retry = bt in ('html_not_json', 'login_wall', 'api_error', 'rate_limit')
         if can_retry:
             result['diagnostics']['retry_attempted'] = True
