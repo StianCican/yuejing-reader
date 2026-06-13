@@ -15,7 +15,7 @@ function renderComicReader(images, title, sourceUrl, diagnostics) {
   renderDiagnosticsPanel(diagnostics);
 
   if (!comicImages.length) {
-    el.innerHTML = '<div class="comic-empty"><span>🖼️</span><p>未提取到图片</p></div>';
+    el.innerHTML = `<div class="comic-empty"><span>${icon('ph:image')}</span><p>未提取到图片</p></div>`;
     return;
   }
 
@@ -25,9 +25,9 @@ function renderComicReader(images, title, sourceUrl, diagnostics) {
     html += `<div class="comic-page" id="comicPage${i}">
       <div class="comic-page-num">${i + 1} / ${comicImages.length}</div>
       <div class="comic-img-wrap">
-        <div class="comic-placeholder">⏳</div>
+        <div class="comic-placeholder">${icon('ph:hourglass-medium')}</div>
         <img data-src="${esc(proxyUrl(url, sourceUrl))}" data-idx="${i}"
-             class="comic-img lazy" onerror="this.style.display='none';this.previousElementSibling.textContent='❌'">
+             class="comic-img lazy" onerror="this.style.display='none';this.previousElementSibling.innerHTML='<iconify-icon icon=&quot;ph:x-circle&quot; inline></iconify-icon>'">
       </div>
     </div>`;
   });
@@ -82,9 +82,9 @@ function renderDiagnosticsPanel(diagnostics) {
   // 构建面板 HTML
   let panelHtml = '<div class="diagnostics-panel-inner">';
   panelHtml += '<div class="diagnostics-panel-header">';
-  panelHtml += '<span>' + (isBlocked ? '🛡 诊断 · 异常' : (hasWarning ? '⚠ 诊断 · 警告' : 'ℹ 诊断'));
+  panelHtml += '<span>' + (isBlocked ? icon('ph:shield-check') + ' 诊断 · 异常' : (hasWarning ? icon('ph:warning') + ' 诊断 · 警告' : icon('ph:info') + ' 诊断'));
   panelHtml += '</span>';
-  panelHtml += '<button class="diagnostics-close" onclick="closeDiagnostics()">✕</button>';
+  panelHtml += '<button class="diagnostics-close" onclick="closeDiagnostics()">' + icon('ph:x') + '</button>';
   panelHtml += '</div>';
   panelHtml += '<div class="diagnostics-panel-body">';
 
@@ -131,7 +131,7 @@ function renderDiagnosticsPanel(diagnostics) {
 
   // 警告
   if (warnings.length) {
-    panelHtml += '<div class="diag-section diag-warnings"><div class="diag-label">⚠ 警告</div>';
+    panelHtml += '<div class="diag-section diag-warnings"><div class="diag-label">' + icon('ph:warning') + ' 警告</div>';
     warnings.forEach(w => {
       panelHtml += '<div class="diag-warning-item">' + esc(w) + '</div>';
     });
@@ -140,19 +140,19 @@ function renderDiagnosticsPanel(diagnostics) {
 
   // 反爬
   if (isBlocked) {
-    panelHtml += '<div class="diag-section diag-antibot"><div class="diag-label">🛡 拦截检测</div>';
+    panelHtml += '<div class="diag-section diag-antibot"><div class="diag-label">' + icon('ph:shield-check') + ' 拦截检测</div>';
     panelHtml += '<div class="diag-value"><b>' + esc(antiBot.block_type) + '</b></div>';
     panelHtml += '<div class="diag-value dim">' + esc(antiBot.evidence || '') + '</div>';
     if (antiBot.suggested_fix) {
-      panelHtml += '<div class="diag-value fix">💡 ' + esc(antiBot.suggested_fix) + '</div>';
+      panelHtml += '<div class="diag-value fix">' + icon('ph:lightbulb') + ' ' + esc(antiBot.suggested_fix) + '</div>';
     }
     panelHtml += '</div>';
   }
 
   // 重试
   if (diagnostics.retry_attempted) {
-    panelHtml += '<div class="diag-section"><div class="diag-label">🔄 绕过重试</div>';
-    panelHtml += '<div class="diag-value">' + (diagnostics.retry_success ? '✅ 成功' : '❌ 失败') + '</div></div>';
+    panelHtml += '<div class="diag-section"><div class="diag-label">' + icon('ph:arrows-clockwise') + ' 绕过重试</div>';
+    panelHtml += '<div class="diag-value">' + (diagnostics.retry_success ? icon('ph:check-circle') + ' 成功' : icon('ph:x-circle') + ' 失败') + '</div></div>';
   }
 
   panelHtml += '</div></div>';
@@ -161,7 +161,7 @@ function renderDiagnosticsPanel(diagnostics) {
   const trigger = document.createElement('div');
   trigger.className = 'diagnostics-trigger' + (hasWarning ? ' has-warning' : '') + (isBlocked ? ' is-blocked' : '');
   trigger.title = isBlocked ? '检测到反爬拦截' : (hasWarning ? '图片提取异常' : '诊断信息');
-  trigger.innerHTML = isBlocked ? '🛡' : (hasWarning ? '⚠' : 'ℹ');
+  trigger.innerHTML = isBlocked ? icon('ph:shield-check') : (hasWarning ? icon('ph:warning') : icon('ph:info'));
   trigger.onclick = toggleDiagnostics;
 
   // 创建面板

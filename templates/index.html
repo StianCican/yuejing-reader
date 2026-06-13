@@ -6,16 +6,16 @@
 <meta name="description" content="阅境——跨书源小说聚合阅读器，支持搜索、收藏、文本与漫画阅读，东方美学界面">
 <title>阅境 · 小说阅读器</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@300;400;500;700&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/vendor/fonts.css">
 <link rel="stylesheet" href="/static/css/style.css">
-<!-- Motion One import map -->
+<!-- Motion One import map（本地离线） -->
 <script type="importmap">
-{ "imports": { "motion": "https://cdn.jsdelivr.net/npm/motion@11/+esm" } }
+{ "imports": { "motion": "/static/vendor/motion.min.js" } }
 </script>
-<!-- Alpine.js -->
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<!-- Alpine.js（本地离线） -->
+<script defer src="/static/vendor/alpinejs.min.js"></script>
+<!-- Iconify Web Component（本地离线，SVG 图标按需加载） -->
+<script defer src="/static/vendor/iconify-icon.min.js"></script>
 </head>
 <body x-data="appState" @keydown.escape="closeSettings()">
 
@@ -27,8 +27,8 @@
       <p id="sourceCount">加载中...</p>
     </div>
     <nav class="sidebar-nav">
-      <button :class="{ 'active': sidebarTab === 'shelf' }" @click="sidebarTab = 'shelf'" aria-label="书架">📖 书架</button>
-      <button :class="{ 'active': sidebarTab === 'sources' }" @click="sidebarTab = 'sources'" aria-label="源管理">⚙ 源管理</button>
+      <button :class="{ 'active': sidebarTab === 'shelf' }" @click="sidebarTab = 'shelf'" aria-label="书架"><iconify-icon icon="ph:book-open-text" inline></iconify-icon>书架</button>
+      <button :class="{ 'active': sidebarTab === 'sources' }" @click="sidebarTab = 'sources'" aria-label="源管理"><iconify-icon icon="ph:gear-six" inline></iconify-icon>源管理</button>
     </nav>
     <div class="sidebar-content">
       <div id="shelfPanel" class="sidebar-section" x-show="sidebarTab === 'shelf'"></div>
@@ -39,9 +39,9 @@
   <!-- Main -->
   <main class="main">
     <div class="topbar" id="topbar">
-      <button class="menu-btn" @click="sidebarOpen = !sidebarOpen" aria-label="菜单">☰</button>
+      <button class="menu-btn" @click="sidebarOpen = !sidebarOpen" aria-label="菜单"><iconify-icon icon="ph:list" inline></iconify-icon></button>
       <div class="search-box">
-        <span class="icon">🔍</span>
+        <span class="icon"><iconify-icon icon="ph:magnifying-glass" inline></iconify-icon></span>
         <input type="search" id="searchInput" placeholder="搜索小说..." @keydown.enter="doSearch()" aria-label="搜索小说">
       </div>
       <div class="nav-btns">
@@ -73,7 +73,7 @@
             <span @click="quickSearch('历史')">历史</span>
           </div>
         </div>
-        <div class="section-title">🔥 书架收藏</div>
+        <div class="section-title"><iconify-icon icon="ph:flame" inline></iconify-icon>书架收藏</div>
         <div id="homeShelf" class="book-grid"></div>
       </div>
 
@@ -87,8 +87,8 @@
         x-transition:leave-end="view-leave-to">
         <div class="type-tabs" id="typeTabs">
           <button class="type-tab active" data-type="" @click="setSearchType('', $el)">全部</button>
-          <button class="type-tab" data-type="0" @click="setSearchType('0', $el)">📖 小说</button>
-          <button class="type-tab" data-type="2" @click="setSearchType('2', $el)">🎨 漫画</button>
+          <button class="type-tab" data-type="0" @click="setSearchType('0', $el)"><iconify-icon icon="ph:book-open-text" inline></iconify-icon>小说</button>
+          <button class="type-tab" data-type="2" @click="setSearchType('2', $el)"><iconify-icon icon="ph:palette" inline></iconify-icon>漫画</button>
         </div>
         <div class="section-title">搜索结果 <span class="count" id="resultCount"></span></div>
         <div id="searchResults" class="book-grid"></div>
@@ -125,10 +125,10 @@
             <button class="btn btn-outline" id="nextChapter" @click="navChapter(1)" aria-label="下一章">下一章 →</button>
           </div>
           <div class="reader-content" id="readerContent" @dblclick="openSettings()"></div>
-          <div class="chapter-done" id="chapterDone"><span class="check">✓</span>本章已读完</div>
+          <div class="chapter-done" id="chapterDone"><span class="check"><iconify-icon icon="ph:check" inline></iconify-icon></span>本章已读完</div>
           <div class="reader-bottom">
             <button class="btn btn-outline" @click="navChapter(-1)" aria-label="上一章">← 上一章</button>
-            <button class="btn btn-outline" @click="showDetail()">📑 返回目录</button>
+            <button class="btn btn-outline" @click="showDetail()"><iconify-icon icon="ph:bookmarks" inline></iconify-icon>返回目录</button>
             <button class="btn btn-outline" @click="navChapter(1)" aria-label="下一章">下一章 →</button>
           </div>
         </div>
@@ -160,7 +160,7 @@
   style="display:none"
 >
   <div class="handle"></div>
-  <h3>⚙ 阅读设置</h3>
+  <h3><iconify-icon icon="ph:gear-six" inline></iconify-icon>阅读设置</h3>
   <label for="fontSizeRange">字号：<span id="fontSizeVal">18</span>px</label>
   <input type="range" id="fontSizeRange" min="14" max="28" value="18" @input="setFontSize($el.value)" aria-label="字号调节">
   <label for="lineHeightRange">行高：<span id="lineHeightVal">2.0</span></label>
@@ -173,9 +173,9 @@
   </div>
   <label>主题</label>
   <div class="theme-btns">
-    <button @click="setTheme('')" style="background:#f7f5f0;color:#2c2416">宣纸</button>
-    <button @click="setTheme('sepia')" style="background:#e8e0cc;color:#3d3528">青绿</button>
-    <button @click="setTheme('dark')" style="background:#1a1814;color:#e8e4de">墨韵</button>
+    <button @click="setTheme('')" data-theme-preview="light">宣纸</button>
+    <button @click="setTheme('sepia')" data-theme-preview="sepia">青绿</button>
+    <button @click="setTheme('dark')" data-theme-preview="dark">墨韵</button>
   </div>
   <button class="btn btn-outline" style="width:100%;margin-top:12px" @click="closeSettings()">关闭</button>
 </div>
@@ -205,7 +205,7 @@
       x-transition:leave-start="toast-leave-from"
       x-transition:leave-end="toast-leave-to"
     >
-      <span class="toast-icon" x-text="t.icon"></span>
+      <span class="toast-icon" x-html="t.icon"></span>
       <span x-text="t.message"></span>
     </div>
   </template>

@@ -259,14 +259,14 @@ async function doSearch() {
     document.getElementById('resultCount').textContent = `共 ${State.searchResults.length} 条结果`;
     renderSearchResults(State.searchResults);
   } catch (e) {
-    document.getElementById('searchResults').innerHTML = '<div class="empty"><div class="icon">❌</div><p>搜索失败，请检查后端是否运行</p></div>';
+    document.getElementById('searchResults').innerHTML = `<div class="empty"><div class="icon">${icon('ph:x-circle')}</div><p>搜索失败，请检查后端是否运行</p></div>`;
   }
 }
 
 function renderSearchResults(results) {
   const el = document.getElementById('searchResults');
   if (!results.length) {
-    el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>没有找到相关书籍</p></div>';
+    el.innerHTML = `<div class="empty"><div class="icon">${icon('ph:mailbox')}</div><p>没有找到相关书籍</p></div>`;
     return;
   }
   // JS 动态设置 animation-delay（替代手写 n 个 nth-child）
@@ -275,12 +275,14 @@ function renderSearchResults(results) {
   el.querySelectorAll('.book-card').forEach((card, i) => {
     card.style.animationDelay = (i * 0.04) + 's';
   });
+  // Motion One stagger 增强（可用时覆盖 CSS animation，弹簧曲线更有东方质感）
+  motionStaggerCards('#searchResults');
 }
 
 function bookCard(b, i) {
-  const typeLabels = {0: '📖 小说', 1: '🎧 听书', 2: '🎨 漫画', 3: '📁 文件', 4: '🎬 影视'};
+  const typeLabels = {0: `${icon('ph:book-open-text')} 小说`, 1: `${icon('ph:headphones')} 听书`, 2: `${icon('ph:palette')} 漫画`, 3: `${icon('ph:folder')} 文件`, 4: `${icon('ph:film-strip')} 影视`};
   const typeBadge = b.source_type != null ? `<span class="type-badge">${typeLabels[b.source_type] || ''}</span>` : '';
-  const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
+  const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : icon('ph:book');
   const sourceHtml = b.source_name ? `<div class="source"><span class="dot"></span>${esc(b.source_name)}${typeBadge}</div>` : '';
   return `<div class="book-card" data-index="${i}">
     <div class="cover"><div class="placeholder">${cover}</div></div>
@@ -299,7 +301,7 @@ async function openBook(b) {
   if (!b.book_url || !b.book_url.trim()) {
     document.getElementById('detailHeader').innerHTML = `
       <div class="cover"><div class="placeholder">📕</div></div>
-      <div class="info"><div class="name">${esc(b.name)}</div><div class="author">✍ ${esc(b.author||'未知')}</div></div>`;
+      <div class="info"><div class="name">${esc(b.name)}</div><div class="author">${icon('ph:pencil-line')} ${esc(b.author||'未知')}</div></div>`;
     document.getElementById('chapterList').innerHTML = '';
     showView('detail');
     return;
@@ -327,18 +329,18 @@ async function openBook(b) {
 
 function renderDetail() {
   const b = State.currentBook;
-  const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : '📕';
+  const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : icon('ph:book');
   document.getElementById('detailHeader').innerHTML = `
     <div class="cover"><div class="placeholder">${cover}</div></div>
     <div class="info">
       <div class="name">${esc(b.name)}</div>
-      <div class="author">✍ ${esc(b.author||'未知')}</div>
+      <div class="author">${icon('ph:pencil-line')} ${esc(b.author||'未知')}</div>
       <div class="meta-row">
-        ${b.kind ? `<span>📂 ${esc(b.kind)}</span>` : ''}
-        ${b.word_count ? `<span>📝 ${esc(b.word_count)}</span>` : ''}
-        <span>📖 来源：${esc(b.source_name||'')}</span>
+        ${b.kind ? `<span>${icon('ph:folder-open')} ${esc(b.kind)}</span>` : ''}
+        ${b.word_count ? `<span>${icon('ph:note-pencil')} ${esc(b.word_count)}</span>` : ''}
+        <span>${icon('ph:book-open-text')} 来源：${esc(b.source_name||'')}</span>
       </div>
-      ${b.last_chapter ? `<div class="meta-row"><span>🔄 最新：${esc(b.last_chapter)}</span></div>` : ''}
+      ${b.last_chapter ? `<div class="meta-row"><span>${icon('ph:arrows-clockwise')} 最新：${esc(b.last_chapter)}</span></div>` : ''}
       <div class="intro">${esc(b.intro||'暂无简介')}</div>
     </div>`;
   const inShelf = State.shelf.some(s => s.source_url===b.source_url && s.book_url===b.book_url);
@@ -348,28 +350,28 @@ function renderDetail() {
   document.getElementById('detailActions').innerHTML = `
     ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? '📖 继续阅读（第'+(savedIdx+1)+'章）' : '📖 开始阅读'}</button>` : ''}
     <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? '💔 取消收藏' : '❤️ 加入书架'}</button>`;
-  document.getElementById('chapterCount').textContent = `📑 章节目录（${State.chapters.length} 章）`;
+  document.getElementById('chapterCount').innerHTML = `${icon('ph:bookmarks')} 章节目录（${State.chapters.length} 章）`;
   let diagHtml = '';
   if (b.source_type === 2 && !State.chapters.length && b.diagnostics) {
     const d = b.diagnostics;
     diagHtml = '<div class="detail-diag-warning">';
-    diagHtml += '<div class="detail-diag-title">⚠ 诊断：该漫画源未返回章节</div>';
+    diagHtml += '<div class="detail-diag-title">' + icon('ph:warning') + ' 诊断：该漫画源未返回章节</div>';
     (d.warnings || []).forEach(w => { diagHtml += '<div class="detail-diag-item">' + esc(w) + '</div>'; });
     if (d.fetch_ok !== undefined) {
       diagHtml += '<div class="detail-diag-tech">';
-      diagHtml += '<div class="diag-tech-row"><span>请求状态</span><b class="' + (d.fetch_ok ? 'ok' : 'fail') + '">' + (d.fetch_ok ? '✓ 成功' : (d.fetch_error ? '✗ ' + esc(d.fetch_error) : '✗ 失败')) + '</b></div>';
+      diagHtml += '<div class="diag-tech-row"><span>请求状态</span><b class="' + (d.fetch_ok ? 'ok' : 'fail') + '">' + (d.fetch_ok ? icon('ph:check') + ' 成功' : (d.fetch_error ? icon('ph:x') + ' ' + esc(d.fetch_error) : icon('ph:x') + ' 失败')) + '</b></div>';
       diagHtml += '<div class="diag-tech-row"><span>响应类型</span><b>' + esc(d.data_type || '?') + '</b></div>';
       if (d.chapter_list_rule) diagHtml += '<div class="diag-tech-row"><span>章节规则</span><code>' + esc(d.chapter_list_rule) + '</code></div>';
-      diagHtml += '<div class="diag-tech-row"><span>规则匹配</span><b class="' + (d.rule_match ? 'ok' : 'fail') + '">' + (d.rule_match ? '✓ 是' : '✗ 否（规则未匹配到章节）') + '</b></div>';
+      diagHtml += '<div class="diag-tech-row"><span>规则匹配</span><b class="' + (d.rule_match ? 'ok' : 'fail') + '">' + (d.rule_match ? icon('ph:check') + ' 是' : icon('ph:x') + ' 否（规则未匹配到章节）') + '</b></div>';
       if (d.data_sample) diagHtml += '<div class="diag-tech-sample"><span>响应样本</span><pre>' + esc(d.data_sample) + '</pre></div>';
       diagHtml += '</div>';
     }
     if (d.anti_bot) {
       const ab = d.anti_bot;
       diagHtml += '<div class="detail-diag-antibot">';
-      diagHtml += '<div class="diag-tech-row"><span>🛡 拦截类型</span><b class="fail">' + esc(ab.block_type || '') + '</b></div>';
+      diagHtml += '<div class="diag-tech-row"><span>' + icon('ph:shield-check') + ' 拦截类型</span><b class="fail">' + esc(ab.block_type || '') + '</b></div>';
       diagHtml += '<div class="diag-tech-row"><span>证据</span><span class="dim">' + esc(ab.evidence || '') + '</span></div>';
-      if (ab.suggested_fix) diagHtml += '<div class="diag-tech-row"><span>💡 建议</span><span>' + esc(ab.suggested_fix) + '</span></div>';
+      if (ab.suggested_fix) diagHtml += '<div class="diag-tech-row"><span>' + icon('ph:lightbulb') + ' 建议</span><span>' + esc(ab.suggested_fix) + '</span></div>';
       diagHtml += '</div>';
     }
     diagHtml += '<div class="detail-diag-meta">源：' + esc(d.source_name || '') + ' | 分组：' + esc(d.source_group || '') + '</div>';
@@ -418,14 +420,14 @@ function renderSources() {
   });
   let html = `
     <div style="display:flex;gap:8px;margin-bottom:12px">
-      <input type="text" id="sourceFilterInput" placeholder="🔍 筛选源..."
+      <input type="text" id="sourceFilterInput" placeholder="筛选源..."
         style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"
         oninput="filterSources()">
-      <button id="filterFlaggedBtn" class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="filterFlagged()" title="只显示已标记源">🚩</button>
-      <button class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="runHealthCheck()" title="检测源可用性">🔍 检测</button>
+      <button id="filterFlaggedBtn" class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="filterFlagged()" title="只显示已标记源">${icon('ph:flag')}</button>
+      <button class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="runHealthCheck()" title="检测源可用性">${icon('ph:magnifying-glass')} 检测</button>
     </div>`;
   if (deadCount > 0) {
-    html += `<button class="btn btn-outline" style="width:100%;margin-bottom:12px;color:var(--red);border-color:var(--red);font-size:12px" onclick="batchDisableDead()">⚠️ 一键禁用 ${deadCount} 个失效源</button>`;
+    html += `<button class="btn btn-outline" style="width:100%;margin-bottom:12px;color:var(--red);border-color:var(--red);font-size:12px" onclick="batchDisableDead()">${icon('ph:warning')} 一键禁用 ${deadCount} 个失效源</button>`;
   }
   for (const [g, list] of Object.entries(groups)) {
     html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
@@ -434,7 +436,7 @@ function renderSources() {
       if (s.status === 'ok')      { dot = 'on';  title = '可用：搜索有结果'; }
       else if (s.status === 'partial') { dot = 'partial'; title = '部分：域名通但搜索状态不明'; }
       else if (s.status === 'dead')  { dot = 'off'; title = '失效：域名不可达'; }
-      const flagIcon = s.flagged ? '🔴' : '⚪';
+      const flagIcon = s.flagged ? icon('ph:circle-fill') : icon('ph:circle');
       const flagTitle = s.flagged ? (s.flag_notes ? `已标记: ${esc(s.flag_notes)}` : '已标记（点击取消）') : '点击标记此源';
       return `<div class="source-item ${s.flagged ? 'flagged' : ''}" title="${title}">
         <span class="dot ${dot}"></span>
@@ -550,10 +552,36 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// ── Iconify 图标辅助函数 ──
+function icon(name) {
+  return `<iconify-icon icon="${name}" inline></iconify-icon>`;
+}
+
+// ── Motion One stagger 入场动画（纯增量，不可用时退化为 CSS animation-delay）──
+function motionStaggerCards(selector) {
+  if (!window._motionAnimate || !window._motionStagger || !window._motionSpring) return;
+  const container = document.querySelector(selector);
+  if (!container) return;
+  const cards = container.querySelectorAll('.book-card');
+  if (!cards.length) return;
+  // 暂停 CSS animation，设初始态
+  cards.forEach(c => {
+    c.style.animation = 'none';
+    c.style.opacity = '0';
+    c.style.transform = 'translateY(16px)';
+  });
+  // Motion One spring stagger
+  window._motionAnimate(
+    cards,
+    { opacity: [0, 1], transform: ['translateY(16px)', 'translateY(0)'] },
+    { delay: window._motionStagger(0.04), easing: window._motionSpring(), duration: 0.5 }
+  );
+}
+
 // ── Toast（Alpine 管理）──
 function showToast(message, type) {
   type = type || 'info';
-  const icons = { success: '✅', error: '❌', info: 'ℹ️' };
+  const icons = { success: icon('ph:check-circle'), error: icon('ph:x-circle'), info: icon('ph:info') };
   const alpine = window._alpine;
   if (!alpine) {
     // Fallback: legacy toast
