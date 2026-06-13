@@ -504,22 +504,163 @@ def _resolve_toc_url(toc_url, page_source, http_base='', fallback_url='', data=N
     return toc_url
 
 
-def _fetch_chapter_images(source, ch_url):
-    """漫画章节图片提取（统一入口）—— 返回 {images, diagnostics}
+def _fetch_chapter_images(source, ch_url, max_pages=10):
+    """漫画章节图片提取（统一入口 + 多页追踪）—— 返回 {images, diagnostics}
 
-    提取策略（按顺序尝试）：
+    提取策略（每页按顺序尝试）：
     1. content_rule（JSON路径/JS代码/CSS选择器）
     2. JSON fetch 回退（混合型源）
     3. JS packer 解码（eval(function(p,a,c,k,e,d){...}) 混淆块）
     4. BeautifulSoup <img> 提取
     5. JSON 递归查找
     最后统一过滤 UI 垃圾图，记录诊断信息。
+
+    多页支持：自动追踪 content_rules 中的 nextContentUrl，逐页提取图片并合并。
     """
     cr = source.content_r
     content_rule = cr.get('content', '')
+    next_rule = cr.get('nextContentUrl', '')
     http_base = source.http_base
     source_name = getattr(source, 'name', '未知')
 
+    # 多页收集
+    all_img_urls = []
+    all_diagnostics_pages = []
+    visited = set()
+    current_url = ch_url
+    final_path = None
+    final_label = 'none'
+    final_dtype = 'none'
+    total_raw = 0
+    total_pages = 0
+
+    for page_idx in range(max_pages):
+        if not current_url or current_url in visited:
+            break
+        visited.add(current_url)
+        total_pages += 1
+
+        page_result = _extract_single_page_images(
+            source, current_url, cr, content_rule, http_base, source_name
+        )
+        imgs = page_result.get('images', [])
+        diag = page_result.get('diagnostics', {})
+        all_diagnostics_pages.append(diag)
+
+        # 记录第一页的提取路径信息
+        if page_idx == 0:
+            final_path = diag.get('extraction_path')
+            final_label = diag.get('path_label', 'none')
+            final_dtype = diag.get('data_type', 'none')
+
+        all_img_urls.extend(imgs)
+        total_raw += diag.get('raw_count', 0)
+
+        # 获取下一页 URL
+        if next_rule:
+            try:
+                data, base_url = source._fetch_raw(current_url)
+                next_url_raw = _resolve_rule(next_rule, data, base_url)
+                if next_url_raw:
+                    # _resolve_rule 可能返回列表，取第一个
+                    if isinstance(next_url_raw, list):
+                        next_url_raw = next_url_raw[0] if next_url_raw else ''
+                    next_url_str = str(next_url_raw).strip()
+                    if next_url_str and next_url_str != current_url:
+                        from urllib.parse import urljoin as _uj
+                        current_url = _uj(current_url, next_url_str)
+                    else:
+                        current_url = None
+                else:
+                    current_url = None
+            except Exception:
+                current_url = None
+        else:
+            current_url = None
+
+    # 去重（保持顺序）
+    seen = set()
+    unique_imgs = []
+    for u in all_img_urls:
+        if u not in seen:
+            seen.add(u)
+            unique_imgs.append(u)
+
+    # 合并警告
+    all_warnings = []
+    for pd in all_diagnostics_pages:
+        all_warnings.extend(pd.get('warnings', []))
+    # 去重警告
+    seen_w = set()
+    unique_warnings = []
+    for w in all_warnings:
+        if w not in seen_w:
+            seen_w.add(w)
+            unique_warnings.append(w)
+
+    # 最终过滤
+    filtered, stats = _filter_junk_images_with_stats(unique_imgs)
+
+    if stats['raw'] > 0:
+        # 用实际去重后数量修正
+        stats['raw'] = len(unique_imgs)
+        stats['dropped'] = stats['raw'] - len(filtered)
+        stats['kept'] = len(filtered)
+        stats['all_junk'] = (stats['dropped'] > 0 and len(filtered) == 0)
+
+    # 生成警告
+    final_warnings = list(unique_warnings)
+    if stats['raw'] == 0:
+        if content_rule:
+            final_warnings.append("content_rule 存在但提取结果为 0（可能反爬/JS 挑战/请求头不足）")
+        else:
+            final_warnings.append("源未配置 content_rule，且自动提取也未找到图片")
+    elif stats.get('all_junk'):
+        final_warnings.append(f"全部 {stats['raw']} 张图片被识别为 UI 垃圾图已过滤")
+    elif stats['dropped'] > 0:
+        final_warnings.append(f"{stats['dropped']}/{stats['raw']} 张被过滤（UI 元素），保留 {stats['kept']} 张")
+
+    # 多页提示
+    if total_pages > 1:
+        final_warnings.insert(0, f"📄 跨 {total_pages} 页提取（nextContentUrl 追踪）")
+
+    # 反爬检测（0 图时用第一页数据）
+    anti_bot = None
+    if stats['raw'] == 0 and all_diagnostics_pages:
+        anti_bot = all_diagnostics_pages[0].get('anti_bot')
+
+    sample_raw = [u[:120] for u in (unique_imgs or [])[:3]]
+    sample_filtered = [u[:120] for u in (filtered or [])[:3]]
+    cr_snippet = content_rule[:200] if content_rule else ''
+    cr_result = all_diagnostics_pages[0].get('content_rule_result') if all_diagnostics_pages else None
+
+    diagnostics = {
+        'extraction_path': final_path,
+        'path_label': final_label,
+        'page_count': total_pages,
+        'raw_count': stats['raw'],
+        'filtered_count': stats['kept'],
+        'junk_dropped': stats['dropped'],
+        'warnings': final_warnings,
+        'content_rule_snippet': cr_snippet,
+        'content_rule_result': cr_result,
+        'data_type': final_dtype,
+        'anti_bot': anti_bot,
+        'sample_raw_urls': sample_raw,
+        'sample_filtered_urls': sample_filtered,
+        'retry_attempted': False,
+        'retry_success': False,
+    }
+    return {'images': filtered, 'diagnostics': diagnostics}
+
+
+def _extract_single_page_images(source, url, cr, content_rule, http_base, source_name):
+    """从单页提取漫画图片 URLs，返回 {images, diagnostics}
+
+    提取策略（按顺序尝试）：
+    1. content_rule 2. JSON fetch 回退 3. JS packer 解码
+    4. BeautifulSoup img 5. JSON 递归查找
+    """
     # 诊断状态
     extraction_path = None
     path_label = 'none'
@@ -527,13 +668,13 @@ def _fetch_chapter_images(source, ch_url):
 
     # 捕获 content_rule 的原始输出（用于诊断）
     _cr_raw_output = None
+    _captured_data = None  # 保存 data 引用供 _finalize 使用
 
     def _finalize(imgs, path, label, dtype, extra_warnings=None):
         """统一收尾：过滤 + 统计 + 诊断"""
         filtered, stats = _filter_junk_images_with_stats(imgs)
         warnings = list(extra_warnings or [])
 
-        # 生成警告
         if stats['raw'] == 0:
             if content_rule:
                 warnings.append(
@@ -550,10 +691,10 @@ def _fetch_chapter_images(source, ch_url):
 
         # 反爬检测（0 图时）
         anti_bot = None
-        if stats['raw'] == 0 and data is not None:
-            anti_bot = inspect_anti_bot(data, content_rule, ch_url)
+        if stats['raw'] == 0 and _captured_data is not None:
+            anti_bot = inspect_anti_bot(_captured_data, content_rule, url)
 
-        # 样本 URL（帮助判断图片是否真正可用）
+        # 样本 URL
         sample_raw = [u[:120] for u in (imgs or [])[:3]]
         sample_filtered = [u[:120] for u in (filtered or [])[:3]]
 
@@ -577,7 +718,7 @@ def _fetch_chapter_images(source, ch_url):
 
     # ── 主流程 ──
     try:
-        data, base_url = source._fetch_raw(_join_url(http_base, ch_url))
+        data, base_url = source._fetch_raw(_join_url(http_base, url))
     except Exception:
         import traceback
         traceback.print_exc()
@@ -592,6 +733,8 @@ def _fetch_chapter_images(source, ch_url):
                 'retry_attempted': False, 'retry_success': False,
             }
         }
+
+    _captured_data = data
 
     # 判断数据类型
     if data is None:
@@ -613,7 +756,7 @@ def _fetch_chapter_images(source, ch_url):
                        content_rule.strip().startswith('['))
     if content_is_json and hasattr(data, 'select_one'):
         try:
-            actual_url, post_body, extra_headers = _parse_post_url(_join_url(http_base, ch_url))
+            actual_url, post_body, extra_headers = _parse_post_url(_join_url(http_base, url))
             headers = source._req_headers()
             headers.update(extra_headers)
             if post_body is not None:
@@ -623,6 +766,7 @@ def _fetch_chapter_images(source, ch_url):
             json_data, _ = safe_json(resp)
             if json_data is not None:
                 data = json_data
+                _captured_data = data
                 base_url = actual_url
                 data_type = 'dict'  # 更新数据类型
         except Exception:
@@ -687,7 +831,7 @@ def _fetch_chapter_images(source, ch_url):
     anti_bot = result['diagnostics']['anti_bot']
     if anti_bot and anti_bot.get('blocked'):
         bt = anti_bot.get('block_type', '')
-        retry_url = _join_url(http_base, ch_url)
+        retry_url = _join_url(http_base, url)
 
         # 判断是否值得重试
         can_retry = bt in ('html_not_json', 'login_wall', 'api_error', 'rate_limit')
@@ -711,7 +855,7 @@ def _fetch_chapter_images(source, ch_url):
                         'Chrome/120.0.0.0 Mobile Safari/537.36'
                     )
                     # 用详情页（章节列表来源）做 Referer
-                    if ch_url:
+                    if url:
                         retry_headers['Referer'] = source.http_base
 
                 if post_body is not None:
