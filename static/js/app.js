@@ -300,7 +300,7 @@ async function openBook(b) {
   State.currentBook = b;
   if (!b.book_url || !b.book_url.trim()) {
     document.getElementById('detailHeader').innerHTML = `
-      <div class="cover"><div class="placeholder">📕</div></div>
+      <div class="cover"><div class="placeholder">${icon('ph:book')}</div></div>
       <div class="info"><div class="name">${esc(b.name)}</div><div class="author">${icon('ph:pencil-line')} ${esc(b.author||'未知')}</div></div>`;
     document.getElementById('chapterList').innerHTML = '';
     showView('detail');
@@ -348,8 +348,8 @@ function renderDetail() {
   const savedIdx = State.readingProgress[bk];
   const hasProgress = savedIdx !== undefined && savedIdx >= 0 && savedIdx < State.chapters.length;
   document.getElementById('detailActions').innerHTML = `
-    ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? '📖 继续阅读（第'+(savedIdx+1)+'章）' : '📖 开始阅读'}</button>` : ''}
-    <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? '💔 取消收藏' : '❤️ 加入书架'}</button>`;
+    ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? icon('ph:book-open-text') + ' 继续阅读（第'+(savedIdx+1)+'章）' : icon('ph:book-open-text') + ' 开始阅读'}</button>` : ''}
+    <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? icon('ph:heart-break') + ' 取消收藏' : icon('ph:heart') + ' 加入书架'}</button>`;
   document.getElementById('chapterCount').innerHTML = `${icon('ph:bookmarks')} 章节目录（${State.chapters.length} 章）`;
   let diagHtml = '';
   if (b.source_type === 2 && !State.chapters.length && b.diagnostics) {
