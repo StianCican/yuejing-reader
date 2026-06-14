@@ -278,16 +278,21 @@ def api_proxy():
     except Exception:
         pass
     referer = request.args.get('referer', '') or request.args.get('source', '') or url
-    # 全面克隆 session 头部（含 Accept-Encoding/Cookie 等 CDN 可能需要的字段）
     headers = dict(session.headers)
     headers['Referer'] = referer
     headers['Accept'] = 'image/webp,image/apng,image/*,*/*;q=0.8'
 
-    import time as _time
+    import time as _time, requests as _req
     last_err = ''
-    for attempt in range(2):
+    # 绕过系统代理直连 CDN（系统代理可能对图片 CDN 限速/超时）
+    no_proxy = {'http': None, 'https': None}
+    for attempt in range(3):
         try:
-            resp = session.get(url, headers=headers, timeout=15, stream=True, verify=False)
+            # 首次尝试：用全局 session 但禁用代理
+            s = session if attempt == 0 else _req.Session()
+            s.verify = False
+            s.timeout = 15
+            resp = s.get(url, headers=headers, timeout=15, stream=True, proxies=no_proxy)
             content_type = resp.headers.get('Content-Type', 'image/jpeg')
             data = resp.content[:5 * 1024 * 1024]
             return Response(data, content_type=content_type,
@@ -295,8 +300,8 @@ def api_proxy():
                                      'Access-Control-Allow-Origin': '*'})
         except Exception as e:
             last_err = str(e)
-            if attempt == 0:
-                _time.sleep(0.5)  # 短暂等待后重试一次
+            if attempt < 2:
+                _time.sleep(0.3)
     return f'Fetch failed: {last_err}', 502
 
 
