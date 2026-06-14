@@ -163,7 +163,7 @@ function renderDiagnosticsPanel(diagnostics) {
   panelHtml += '<div class="diagnostics-panel-header">';
   panelHtml += '<span>' + (isBlocked ? icon('ph:shield-check') + ' 诊断 · 异常' : (hasWarning ? icon('ph:warning') + ' 诊断 · 警告' : icon('ph:info') + ' 诊断'));
   panelHtml += '</span>';
-  panelHtml += '<button class="diagnostics-close" onclick="closeDiagnostics()">' + icon('ph:x') + '</button>';
+  panelHtml += '<button class="diagnostics-close" data-action="close-diag">' + icon('ph:x') + '</button>';
   panelHtml += '</div>';
   panelHtml += '<div class="diagnostics-panel-body">';
 
@@ -247,6 +247,9 @@ function renderDiagnosticsPanel(diagnostics) {
   const panel = document.createElement('div');
   panel.className = 'diagnostics-panel';
   panel.innerHTML = panelHtml;
+  // 绑定关闭按钮（消除 inline onclick）
+  const closeBtn = panel.querySelector('.diagnostics-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeDiagnostics);
 
   document.body.appendChild(trigger);
   document.body.appendChild(panel);

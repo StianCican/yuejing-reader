@@ -431,8 +431,8 @@ function renderDetail() {
   const savedIdx = State.readingProgress[bk];
   const hasProgress = savedIdx !== undefined && savedIdx >= 0 && savedIdx < State.chapters.length;
   document.getElementById('detailActions').innerHTML = `
-    ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? icon('ph:book-open-text') + ' 继续阅读（第'+(savedIdx+1)+'章）' : icon('ph:book-open-text') + ' 开始阅读'}</button>` : ''}
-    <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? icon('ph:heart-break') + ' 取消收藏' : icon('ph:heart') + ' 加入书架'}</button>`;
+    ${State.chapters.length ? '<button class="btn btn-primary" data-detail-action="read" data-idx="'+(hasProgress ? savedIdx : 0)+'">' + (hasProgress ? icon('ph:book-open-text') + ' 继续阅读（第'+(savedIdx+1)+'章）' : icon('ph:book-open-text') + ' 开始阅读') + '</button>' : ''}
+    <button class="btn btn-outline" data-detail-action="shelf">${inShelf ? icon('ph:heart-break') + ' 取消收藏' : icon('ph:heart') + ' 加入书架'}</button>`;
   document.getElementById('chapterCount').innerHTML = `${icon('ph:bookmarks')} 章节目录（${State.chapters.length} 章）`;
   // 诊断 HTML → 响应式状态，Alpine x-for 自动渲染
   State._chapterDiagHTML = diagHtml;
@@ -655,3 +655,11 @@ function showToast(message, type) {
 
 // Legacy compatibility
 function toast(msg) { showToast(msg, 'info'); }
+
+// ── 事件委托：详情页操作按钮（消除 inline onclick）──
+document.getElementById('detailActions').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-detail-action]');
+  if (!btn) return;
+  if (btn.dataset.detailAction === 'read') readChapter(parseInt(btn.dataset.idx));
+  else if (btn.dataset.detailAction === 'shelf') toggleShelf();
+});

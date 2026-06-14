@@ -12,36 +12,10 @@ async function loadShelf() {
   } catch (e) { State.shelf = []; }
 }
 
-// ── 侧边栏书架 ──
+// ── 侧边栏书架（Alpine x-for 已接管 #shelfPanel 渲染）──
 function renderShelf() {
-  const el = document.getElementById('shelfPanel');
-  if (!State.shelf.length) {
-    el.innerHTML = '<div class="empty" style="padding:20px"><p>书架空空如也</p></div>';
-    return;
-  }
-  el.innerHTML = '<h3>我的书架</h3>' + State.shelf.map(b => {
-    const bk = getBookKey(b);
-    const progress = State.readingProgress[bk];
-    let progressText = '';
-    if (progress !== undefined) {
-      const ch = typeof progress === 'object' ? progress.chapter : progress;
-      const total = typeof progress === 'object' ? progress.total : null;
-      if (total && total > 0) {
-        const pct = Math.round((ch + 1) / total * 100);
-        progressText = `<div class="progress-badge">${icon('ph:book-open-text')} ${pct}%（${ch+1}/${total}章）</div>`;
-      } else {
-        progressText = `<div class="progress-badge">${icon('ph:book-open-text')} 已读 ${ch+1} 章</div>`;
-      }
-    }
-    return `<div class="shelf-item" onclick='openBook(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
-      <div class="cover">${b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : icon('ph:book')}</div>
-      <div class="info">
-        <div class="name">${esc(b.name)}</div>
-        <div class="author">${esc(b.author||'')}</div>
-        ${progressText}
-      </div>
-    </div>`;
-  }).join('');
+  // 不再使用 innerHTML 写入，避免覆盖 Alpine <template x-for>
+  // 书架 DOM 由 Alpine 响应式自动维护
 }
 
 // ── 首页书架 ──
