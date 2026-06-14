@@ -657,8 +657,9 @@ function showToast(message, type) {
 function toast(msg) { showToast(msg, 'info'); }
 
 // ── 事件委托：详情页操作按钮（消除 inline onclick）──
-document.getElementById('detailActions').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-detail-action]');
+// 在 document 上委托，因为 #detailActions 在详情页渲染前不存在
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#detailActions button[data-detail-action]');
   if (!btn) return;
   if (btn.dataset.detailAction === 'read') readChapter(parseInt(btn.dataset.idx));
   else if (btn.dataset.detailAction === 'shelf') toggleShelf();
