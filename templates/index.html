@@ -12,6 +12,35 @@
 <script type="importmap">
 { "imports": { "motion": "/static/vendor/motion.min.js" } }
 </script>
+<!-- 关键加载顺序（全部 defer，按文档顺序执行）：
+     1. app.js 必须先跑 —— 它会调用 Alpine.data('appState', ...) 注册组件工厂；
+        但此时 Alpine 还没加载，怎么调？答：app.js 把注册函数挂到 window，
+        等 Alpine 加载后由 alpine.min.js 之后的 alpine-bootstrap.js 拿来调。
+     不行。换个方案：手动 polyfill window.Alpine = { data: queueRegister } 占位，
+     等真 Alpine 加载完取出队列重放。最干净。 -->
+<script>
+  // 拦截 Alpine 自动 start：alpine.min.js 末尾用 queueMicrotask(Alpine.start) 自启，
+  // 但因为 defer 脚本之间会清微任务队列，alpine 加载完立刻 start，赶在 app.js 之前
+  // → 模板里 x-data="appState" 全部 ReferenceError。
+  // 方案：alpine.min.js 已被人工补丁屏蔽末尾的 Alpine.start()，由 app.js 手动启动。
+  // 这里只占位 Alpine.data() 队列：让 app.js 注册的 appState 等 alpine 加载完重放。
+  (function () {
+    const dataQueue = [];
+    let realAlpine = null;
+    Object.defineProperty(window, 'Alpine', {
+      configurable: true,
+      get() {
+        if (realAlpine) return realAlpine;
+        return { data: (n, f) => dataQueue.push([n, f]), reactive: (o) => o };
+      },
+      set(v) {
+        realAlpine = v;
+        // 重放排队的 data() 注册
+        dataQueue.forEach(([n, f]) => realAlpine.data(n, f));
+      },
+    });
+  })();
+</script>
 <!-- Alpine.js（本地离线） -->
 <script defer src="/static/vendor/alpinejs.min.js"></script>
 <!-- Iconify Web Component（本地离线，SVG 图标按需加载） -->

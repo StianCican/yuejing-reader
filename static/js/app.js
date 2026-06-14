@@ -234,7 +234,15 @@ if (typeof Alpine === 'undefined') {
   throw new Error('Alpine 未加载');
 }
 // Alpine 已就绪 —— 立刻同步注册组件，必须在 Alpine.start() 之前
+// （alpine.min.js 已打补丁屏蔽了末尾的 queueMicrotask(Alpine.start) 自启）
 registerAlpineComponents();
+
+if (typeof Alpine !== 'undefined' && typeof Alpine.start === 'function') {
+  console.log('[probe] manually starting Alpine');
+  Alpine.start();
+} else {
+  console.error('[probe] Alpine.start 不可用，页面无法初始化');
+}
 const State = Alpine.reactive({
   currentView: 'home',
   currentBook: null,
