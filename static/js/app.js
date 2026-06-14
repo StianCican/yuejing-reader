@@ -292,18 +292,20 @@ function saveProgress(bookKey, chapterIdx, totalChapters) {
   State.readingProgress[bookKey] = totalChapters ? { chapter: chapterIdx, total: totalChapters } : chapterIdx;
   S.setItem('readingProgress', JSON.stringify(State.readingProgress));
 }
-function saveScrollPos(bookKey) {
+function saveScrollPos(bookKey, chapterIdx) {
   const el = document.getElementById('content');
   if (el) {
     try {
+      const key = 'scrollPos_' + bookKey + '_' + (chapterIdx ?? 0);
       const pos = { scrollTop: el.scrollTop, timestamp: Date.now() };
-      S.setItem('scrollPos_' + bookKey, JSON.stringify(pos));
+      S.setItem(key, JSON.stringify(pos));
     } catch(e) {}
   }
 }
-function restoreScrollPos(bookKey) {
+function restoreScrollPos(bookKey, chapterIdx) {
   try {
-    const raw = S.getItem('scrollPos_' + bookKey);
+    const key = 'scrollPos_' + bookKey + '_' + (chapterIdx ?? 0);
+    const raw = S.getItem(key);
     if (raw) {
       const pos = JSON.parse(raw);
       if (Date.now() - pos.timestamp < 86400000) {

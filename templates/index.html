@@ -126,6 +126,9 @@
         <input type="search" id="searchInput" placeholder="搜索小说..." @keydown.enter="doSearch()" aria-label="搜索小说">
       </div>
       <div class="nav-btns">
+        <button @click="runHealthCheck()" title="检测源可用性（所有页面可用）" style="font-size:12px">
+          <iconify-icon icon="ph:magnifying-glass" inline></iconify-icon> 检测
+        </button>
         <button @click="showHome()">首页</button>
         <button @click="goBack()">← 返回</button>
       </div>

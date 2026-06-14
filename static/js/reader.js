@@ -3,19 +3,22 @@
    ════════════════════════════════════════════════════════════════ */
 
 // ── 段落式正文渲染 ──
+// 诊断面板 HTML（独立函数，无论内容是否为空都可追加到内容底部）
+function diagPanelHTML(diagnostics) {
+  if (!diagnostics) return '';
+  let h = '<div class="diagnostics-panel" style="margin-top:24px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6;border-left:3px solid var(--amber)">';
+  h += '<div style="font-weight:600;margin-bottom:4px;color:var(--amber)"><iconify-icon icon="ph:warning" inline></iconify-icon> 诊断信息</div>';
+  if (diagnostics.reason) h += '<div>' + esc(diagnostics.reason) + '</div>';
+  if (diagnostics.raw_rule) h += '<div>规则：<code>' + esc(diagnostics.raw_rule) + '</code></div>';
+  if (diagnostics.returned_as_content) h += '<div>返回内容预览：<code>' + esc(diagnostics.returned_as_content) + '</code></div>';
+  h += '<div style="margin-top:4px">URL：<code style="word-break:break-all;font-size:11px">' + esc(diagnostics.ch_url || '') + '</code></div>';
+  h += '</div>';
+  return h;
+}
+
 function renderContent(text, diagnostics) {
   if (!text) {
-    let diagHtml = '';
-    if (diagnostics) {
-      diagHtml = '<div class="diagnostics-panel" style="margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6">';
-      diagHtml += '<div style="font-weight:600;margin-bottom:4px;color:var(--amber)"><iconify-icon icon="ph:warning" inline></iconify-icon> 诊断信息</div>';
-      if (diagnostics.reason) diagHtml += '<div>' + esc(diagnostics.reason) + '</div>';
-      if (diagnostics.raw_rule) diagHtml += '<div>规则：<code>' + esc(diagnostics.raw_rule) + '</code></div>';
-      if (diagnostics.returned_as_content) diagHtml += '<div>返回内容预览：<code>' + esc(diagnostics.returned_as_content) + '</code></div>';
-      diagHtml += '<div style="margin-top:4px">URL：<code style="word-break:break-all">' + esc(diagnostics.ch_url || '') + '</code></div>';
-      diagHtml += '</div>';
-    }
-    return '<div class="empty"><div class="icon"><iconify-icon icon="ph:warning-circle" inline></iconify-icon></div><p>该章节内容为空<br><small>可能是源站限制或章节已下架</small></p>' + diagHtml + '</div>';
+    return '<div class="empty"><div class="icon"><iconify-icon icon="ph:warning-circle" inline></iconify-icon></div><p>该章节内容为空<br><small>可能是源站限制或章节已下架</small></p>' + diagPanelHTML(diagnostics) + '</div>';
   }
   const paragraphs = text.split(/\n\s*\n/);
   return paragraphs
@@ -65,8 +68,9 @@ async function readChapter(idx, direction) {
     if (ctype === 'comic') {
       renderComicReader(data.images || [], ch.name, data.source_url || State.currentBook.source_url, data.diagnostics);
     } else {
-      console.log('[reader] content length:', (data.content || '').length, 'has_diag:', !!data.diagnostics);
-      readerContent.innerHTML = renderContent(data.content || '', data.diagnostics);
+      const contentLen = (data.content || '').length;
+      console.log('[reader] content length:', contentLen, 'has_diag:', !!data.diagnostics);
+      readerContent.innerHTML = renderContent(data.content || '', data.diagnostics) + diagPanelHTML(data.diagnostics);
     }
 
     window._isFirst = idx <= 0;
@@ -117,7 +121,7 @@ async function readChapter(idx, direction) {
     if (State.currentBook) {
       const bk = getBookKey(State.currentBook);
       saveProgress(bk, idx, State.chapters.length);
-      restoreScrollPos(bk);
+      restoreScrollPos(bk, idx);  // 按章节恢复滚动位置
     }
     if (window.innerWidth <= 768) {
       document.getElementById('sidebar').classList.add('hidden');
@@ -159,7 +163,7 @@ async function readChapter(idx, direction) {
 }
 
 function navChapter(dir) {
-  if (State.currentBook) saveScrollPos(getBookKey(State.currentBook));
+  if (State.currentBook) saveScrollPos(getBookKey(State.currentBook), State.currentChapterIdx);
   readChapter(State.currentChapterIdx + dir, dir);
 }
 
@@ -177,7 +181,7 @@ document.addEventListener('keydown', (e) => {
       else navChapter(1);
       break;
     case 'Escape':
-      if (State.currentBook) saveScrollPos(getBookKey(State.currentBook));
+      if (State.currentBook) saveScrollPos(getBookKey(State.currentBook), State.currentChapterIdx);
       showDetail();
       break;
     case 't':          cycleTheme();   break;

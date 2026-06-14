@@ -165,12 +165,13 @@ def api_detail():
     book['book_url'] = book_url
     stype = getattr(src, 'source_type', 0)
     book['source_type'] = stype
-    # 漫画/图片类源 0 章节时附加诊断信息
-    if stype in (2,) and not book.get('chapters'):
+    # 所有类型：章节为空时附加诊断信息
+    if not book.get('chapters'):
         raw_diag = book.pop('_detail_diag', None) or getattr(src, '_last_detail_diag', None)
+        type_label = {0: '小说', 1: '听书', 2: '漫画', 3: '文件', 4: '影视'}.get(stype, f'类型{stype}')
         diag = {
             'level': 'detail',
-            'warnings': [f'源「{src.name}」返回 0 章节 — 可能反爬拦截或源配置失效'],
+            'warnings': [f'{type_label}源「{src.name}」返回 0 章节 — 可能反爬拦截或源配置失效'],
             'source_name': src.name,
             'source_type': stype,
             'source_group': getattr(src, 'group', ''),
@@ -214,7 +215,7 @@ def api_chapter():
                            source_url=source_url, count=len(imgs))
     # 默认：文本
     content = src.chapter_content(ch_url)
-    # 诊断信息：检测内容是否看起来像未解析的规则
+    # 诊断信息
     diag = None
     raw_content_rule = getattr(src, 'content_r', {}).get('content', '')
     if content and (content.startswith('$.') or '<js>' in content):
@@ -224,11 +225,18 @@ def api_chapter():
             'returned_as_content': content[:200],
             'ch_url': ch_url,
         }
-        content = ''  # 将未解析的规则视为空内容，触发前端空态提示
-    elif not content:
+        content = ''
+    elif not content or not content.strip():
         diag = {
             'reason': '内容为空 — 可能反爬、源站限制或章节不存在',
             'raw_rule': raw_content_rule,
+            'ch_url': ch_url,
+        }
+    elif len(content) < 80:
+        diag = {
+            'reason': '内容异常短（' + str(len(content)) + ' 字符）— 可能为错误页或反爬拦截',
+            'raw_rule': raw_content_rule,
+            'returned_as_content': content[:200],
             'ch_url': ch_url,
         }
     return jsonify(content_type='text', content=content, diagnostics=diag)
