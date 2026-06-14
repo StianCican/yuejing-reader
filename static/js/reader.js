@@ -1,6 +1,9 @@
 /* ════════════════════════════════════════════════════════════════
-   reader.js — 阅读器：章节加载、正文渲染、3D 翻页、进度
+   reader.js — 阅读器：章节加载、正文渲染、翻页动画、进度
    ════════════════════════════════════════════════════════════════ */
+
+// 翻页动画开关（可在设置面板切换）
+if (window._pageAnimEnabled === undefined) window._pageAnimEnabled = true;
 
 // ── 段落式正文渲染 ──
 // 诊断面板 HTML —— 默认折叠，点击标题行展开/收起
@@ -42,17 +45,15 @@ async function readChapter(idx, direction) {
 
   const readerContent = document.getElementById('readerContent');
 
-  // 3D 翻页：先翻出（纸张投影）—— 提速至 0.1s
-  if (oldIdx >= 0 && window._motionAnimate) {
-    readerContent.classList.add('flipping');
+  // 翻页动画：轻量淡出 + 微平移（远快于 3D rotateY，不卡）
+  if (oldIdx >= 0 && window._motionAnimate && window._pageAnimEnabled !== false) {
     try {
       await window._motionAnimate(
         readerContent,
-        { opacity: [1, 0.6], transform: `rotateY(${direction * 45}deg)` },
-        { duration: 0.1, easing: [0.65, 0, 0.35, 1] }
+        { opacity: [1, 0], x: direction * -30 },
+        { duration: 0.08, easing: 'ease-in' }
       ).finished;
     } catch(e) {}
-    readerContent.classList.remove('flipping');
   }
 
   // 加载内容
@@ -137,21 +138,19 @@ async function readChapter(idx, direction) {
     return;
   }
 
-  // 3D 翻页：翻入 —— 从翻出状态回到正常（0.15s）
-  if (window._motionAnimate) {
-    readerContent.style.transform = `rotateY(${-direction * 45}deg)`;
-    readerContent.style.opacity = '0.6';
-    readerContent.classList.add('flip-in');
+  // 翻入：淡入 + 微平移（0.12s）—— 从内容就绪后丝滑进场
+  if (window._motionAnimate && window._pageAnimEnabled !== false) {
+    readerContent.style.opacity = '0';
+    readerContent.style.transform = `translateX(${direction * 30}px)`;
     try {
       await window._motionAnimate(
         readerContent,
-        { transform: [`rotateY(${-direction * 45}deg)`, 'rotateY(0deg)'], opacity: [0.6, 1] },
-        { duration: 0.15, easing: [0.16, 1, 0.3, 1] }
+        { opacity: [0, 1], x: [direction * 30, 0] },
+        { duration: 0.12, easing: [0.16, 1, 0.3, 1] }
       ).finished;
     } catch(e) {}
-    readerContent.classList.remove('flip-in');
-    readerContent.style.transform = '';
     readerContent.style.opacity = '';
+    readerContent.style.transform = '';
   }
 
   // 章节读完标记

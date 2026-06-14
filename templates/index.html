@@ -314,6 +314,10 @@
     <button @click="setTheme('sepia')" data-theme-preview="sepia">青绿</button>
     <button @click="setTheme('dark')" data-theme-preview="dark">墨韵</button>
   </div>
+  <label>翻页动画</label>
+  <button id="animToggle" class="btn btn-outline active" style="width:100%" @click="togglePageAnim()">
+    <iconify-icon icon="ph:film-script" inline></iconify-icon> 翻页动画：<span id="animState">开</span>
+  </button>
   <button class="btn btn-outline" style="width:100%;margin-top:12px" @click="closeSettings()">关闭</button>
 </div>
 

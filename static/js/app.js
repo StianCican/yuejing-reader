@@ -114,6 +114,8 @@ function registerAlpineComponents() {
       if (flaggedOnly) filtered = filtered.filter(s => s.flagged);
       if (q) filtered = filtered.filter(s => (s.name || '').toLowerCase().includes(q));
       // 按类型分组，组内按健康状态排序（ok > partial > 未测 > dead）
+      // 类型标签 + 显示顺序（小说最先，漫画其次）
+      const typeOrder = ['📖 小说', '🎨 漫画', '🎧 听书', '🎬 影视', '📁 文件', '📦 其他'];
       const typeLabels = {0: '📖 小说', 1: '🎧 听书', 2: '🎨 漫画', 3: '📁 文件', 4: '🎬 影视'};
       const statusOrder = {ok: 0, partial: 1, undefined: 2, dead: 3};
       const groups = {};
@@ -123,11 +125,7 @@ function registerAlpineComponents() {
         groups[typeLabel].push(s);
       });
       return Object.entries(groups)
-        .sort((a, b) => {
-          const ta = parseInt(Object.keys(typeLabels).find(k => typeLabels[k] === a[0])) || 99;
-          const tb = parseInt(Object.keys(typeLabels).find(k => typeLabels[k] === b[0])) || 99;
-          return ta - tb;
-        })
+        .sort((a, b) => typeOrder.indexOf(a[0]) - typeOrder.indexOf(b[0]))
         .map(([name, items]) => ({
           name,
           items: items.sort((a, b) => (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2))
@@ -239,6 +237,13 @@ function registerAlpineComponents() {
       if (stateEl) stateEl.textContent = on ? '开' : '关';
     },
     setParagraphSpacing(v) { window._setParagraphSpacing?.(v); },
+    togglePageAnim() {
+      window._pageAnimEnabled = !window._pageAnimEnabled;
+      const btn = document.getElementById('animToggle');
+      const stateEl = document.getElementById('animState');
+      if (btn) btn.classList.toggle('active', window._pageAnimEnabled);
+      if (stateEl) stateEl.textContent = window._pageAnimEnabled ? '开' : '关';
+    },
   }));
 }
 
