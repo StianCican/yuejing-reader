@@ -581,20 +581,63 @@ function renderSources() {
 }
 
 let healthCheckRunning = false;
+let _healthPollTimer = null;
+
 async function runHealthCheck() {
-  if (healthCheckRunning) return;
+  if (healthCheckRunning) {
+    showToast('健康检测已在运行中', 'info');
+    return;
+  }
   healthCheckRunning = true;
-  showToast('🔍 阶段1：检测域名连通性...', 'info');
+
+  const headEl = document.getElementById('sourceCount');
+  const panelEl = document.getElementById('sourcesPanelStats');
+  const pollStart = Date.now();
+  let pollCount = 0;
+
   try {
-    await fetch('/api/health_check', { method: 'POST' });
-    await new Promise(r => setTimeout(r, 5000));
+    const resp = await fetch('/api/health_check', { method: 'POST' });
+    const data = await resp.json();
+    showToast(`🔍 健康检测已启动（${data.domains} 个域名），进行中...`, 'info');
+
+    // 轮询源状态直到全部测试完毕（最多 3 分钟）
+    await new Promise(resolve => {
+      _healthPollTimer = setInterval(async () => {
+        pollCount++;
+        const elapsed = Math.round((Date.now() - pollStart) / 1000);
+        try {
+          const r = await fetch('/api/sources?_=' + pollCount);
+          const sources = await r.json();
+          const ok = sources.filter(s => s.status === 'ok').length;
+          const dead = sources.filter(s => s.status === 'dead').length;
+          const tested = ok + dead + sources.filter(s => s.status === 'partial').length;
+          const total = sources.length;
+
+          if (headEl) headEl.textContent = `检测中 ${elapsed}s · ${ok}可用`;
+          if (panelEl) panelEl.innerHTML = `🔍 健康检测进行中... ${elapsed}s<br>${ok} 可用 · ${dead} 失效 · ${tested}/${total} 已测`;
+
+          if (tested >= total) {
+            clearInterval(_healthPollTimer);
+            _healthPollTimer = null;
+            resolve();
+          }
+        } catch(_) {}
+      }, 3000);
+
+      // 安全超时
+      setTimeout(() => {
+        if (_healthPollTimer) { clearInterval(_healthPollTimer); _healthPollTimer = null; resolve(); }
+      }, 180000);
+    });
+
     await loadSources();
-    showToast('🔍 阶段2：测试搜索能力...', 'info');
-    await new Promise(r => setTimeout(r, 15000));
-    await loadSources();
-    showToast('✅ 检测完成——查看源列表状态点', 'success');
-  } catch(e) { showToast('检测失败', 'error'); }
+    const elapsed = Math.round((Date.now() - pollStart) / 1000);
+    showToast(`✅ 健康检测完成！耗时 ${elapsed}s`, 'success');
+  } catch(e) {
+    showToast('健康检测失败：' + e.message, 'error');
+  }
   healthCheckRunning = false;
+  if (_healthPollTimer) { clearInterval(_healthPollTimer); _healthPollTimer = null; }
 }
 
 async function toggleSource(url) {

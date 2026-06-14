@@ -214,7 +214,24 @@ def api_chapter():
                            source_url=source_url, count=len(imgs))
     # 默认：文本
     content = src.chapter_content(ch_url)
-    return jsonify(content_type='text', content=content)
+    # 诊断信息：检测内容是否看起来像未解析的规则
+    diag = None
+    raw_content_rule = getattr(src, 'content_r', {}).get('content', '')
+    if content and (content.startswith('$.') or '<js>' in content):
+        diag = {
+            'reason': '规则未解析 — 源站返回格式可能与规则不匹配',
+            'raw_rule': raw_content_rule,
+            'returned_as_content': content[:200],
+            'ch_url': ch_url,
+        }
+        content = ''  # 将未解析的规则视为空内容，触发前端空态提示
+    elif not content:
+        diag = {
+            'reason': '内容为空 — 可能反爬、源站限制或章节不存在',
+            'raw_rule': raw_content_rule,
+            'ch_url': ch_url,
+        }
+    return jsonify(content_type='text', content=content, diagnostics=diag)
 
 
 @app.route('/api/proxy')

@@ -3,8 +3,20 @@
    ════════════════════════════════════════════════════════════════ */
 
 // ── 段落式正文渲染 ──
-function renderContent(text) {
-  if (!text) return '<div class="empty"><div class="icon"><iconify-icon icon="ph:warning-circle" inline></iconify-icon></div><p>该章节内容为空<br><small>可能是源站限制或章节已下架</small></p></div>';
+function renderContent(text, diagnostics) {
+  if (!text) {
+    let diagHtml = '';
+    if (diagnostics) {
+      diagHtml = '<div class="diagnostics-panel" style="margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6">';
+      diagHtml += '<div style="font-weight:600;margin-bottom:4px;color:var(--amber)"><iconify-icon icon="ph:warning" inline></iconify-icon> 诊断信息</div>';
+      if (diagnostics.reason) diagHtml += '<div>' + esc(diagnostics.reason) + '</div>';
+      if (diagnostics.raw_rule) diagHtml += '<div>规则：<code>' + esc(diagnostics.raw_rule) + '</code></div>';
+      if (diagnostics.returned_as_content) diagHtml += '<div>返回内容预览：<code>' + esc(diagnostics.returned_as_content) + '</code></div>';
+      diagHtml += '<div style="margin-top:4px">URL：<code style="word-break:break-all">' + esc(diagnostics.ch_url || '') + '</code></div>';
+      diagHtml += '</div>';
+    }
+    return '<div class="empty"><div class="icon"><iconify-icon icon="ph:warning-circle" inline></iconify-icon></div><p>该章节内容为空<br><small>可能是源站限制或章节已下架</small></p>' + diagHtml + '</div>';
+  }
   const paragraphs = text.split(/\n\s*\n/);
   return paragraphs
     .map(p => `<p>${esc(p.trim()).replace(/\n/g, '<br>')}</p>`)
@@ -53,8 +65,8 @@ async function readChapter(idx, direction) {
     if (ctype === 'comic') {
       renderComicReader(data.images || [], ch.name, data.source_url || State.currentBook.source_url, data.diagnostics);
     } else {
-      console.log('[reader] content length:', (data.content || '').length, 'first 50:', (data.content || '').substring(0, 50));
-      readerContent.innerHTML = renderContent(data.content);
+      console.log('[reader] content length:', (data.content || '').length, 'has_diag:', !!data.diagnostics);
+      readerContent.innerHTML = renderContent(data.content || '', data.diagnostics);
     }
 
     window._isFirst = idx <= 0;
