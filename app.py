@@ -16,7 +16,7 @@ if sys.platform == 'win32':
 from flask import Flask, request, jsonify, render_template, Response
 from sources import SourceManager
 from utils.http import _parse_inline_header, session
-from utils.paths import shelf_file, user_data_path
+from utils.paths import shelf_file, user_data_path, resource_path
 
 mgr = SourceManager()
 
@@ -46,7 +46,9 @@ def save_shelf(data):
 # Flask 路由
 # ════════════════════════════════════════════════════════════════
 
-app = Flask(__name__)
+app = Flask(__name__,
+            template_folder=str(resource_path('templates')),
+            static_folder=str(resource_path('static')))
 
 # 开发模式：禁用静态文件缓存，每次加载最新版本
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0

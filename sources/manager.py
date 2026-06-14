@@ -235,8 +235,8 @@ class SourceManager:
                 src_path = str(user_book_sources)
             else:
                 # 兜底：项目内置 default_sources.json（开发模式 + 首次启动）
-                from pathlib import Path
-                src_path = str(Path(__file__).resolve().parent.parent / 'default_sources.json')
+                from utils.paths import resource_path
+                src_path = str(resource_path('default_sources.json'))
         try:
             with open(src_path, encoding='utf-8') as f:
                 data = json.load(f)
