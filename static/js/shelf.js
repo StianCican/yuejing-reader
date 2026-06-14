@@ -46,14 +46,12 @@ function renderShelf() {
 
 // ── 首页书架 ──
 function renderHomeShelf() {
-  const el = document.getElementById('homeShelf');
-  if (!State.shelf.length) {
-    el.innerHTML = `<div class="empty"><div class="icon">${icon('ph:book-open-text')}</div><p>还没有收藏，搜索一本书试试</p></div>`;
-    return;
+  // Alpine x-for 自动渲染，Motion One stagger 由 $watch 触发
+  // 保留函数签名兼容旧调用（appState.showHome() 等）
+  if (typeof motionStaggerCards === 'function') {
+    // 延迟一帧确保 Alpine DOM 已更新
+    requestAnimationFrame(() => motionStaggerCards('#homeShelf'));
   }
-  el.innerHTML = State.shelf.map((b, i) => bookCard(b, i)).join('');
-  // Motion One stagger 增强
-  if (typeof motionStaggerCards === 'function') motionStaggerCards('#homeShelf');
 }
 
 // ── 收藏/取消 ──

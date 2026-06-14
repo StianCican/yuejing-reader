@@ -14,10 +14,19 @@ document.addEventListener('alpine:init', () => {
     settingsOpen: false,
     toasts: [],
 
-    // 当前阅读上下文（由 reader.js/shelf.js 使用）
+    // 当前阅读上下文 & 列表数据（由 Alpine.reactive State 驱动）
     get currentBook() { return window.State?.currentBook; },
     get chapters() { return window.State?.chapters || []; },
     get currentChapterIdx() { return window.State?.currentChapterIdx ?? -1; },
+    get searchResults() { return window.State?.searchResults || []; },
+    get shelf() { return window.State?.shelf || []; },
+    get sources() { return window.State?.sources || []; },
+
+    // 书卡 HTML 桥接（供 x-for + x-html 使用）
+    bookCardHTML(b, i) {
+      if (typeof bookCard === 'function') return bookCard(b, i);
+      return '';
+    },
 
     init() {
       window._alpine = this;
@@ -25,10 +34,21 @@ document.addEventListener('alpine:init', () => {
       loadSources();
       loadProgress();
       applyReadingSettings();
-      setupEventDelegation();
       setupTopbarScroll();
       setupRippleEffect();
       setupBookCardTilt();
+
+      // $watch: 搜索/书架数据变化后触发 Motion One stagger
+      this.$watch('searchResults', () => {
+        this.$nextTick(() => {
+          if (typeof motionStaggerCards === 'function') motionStaggerCards('#searchResults');
+        });
+      });
+      this.$watch('shelf', () => {
+        this.$nextTick(() => {
+          if (typeof motionStaggerCards === 'function') motionStaggerCards('#homeShelf');
+        });
+      });
     },
 
     // ── Navigation ──
@@ -46,6 +66,7 @@ document.addEventListener('alpine:init', () => {
     showDetail() {
       if (State.currentBook) this.currentView = 'detail';
     },
+    openBook(b) { window.openBook(b); },
     goBack() {
       if (this.currentView === 'reader') this.showDetail();
       else if (this.currentView === 'detail') this.currentView = 'search';
@@ -89,8 +110,8 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
-// ── Legacy State（向后兼容 reader/shelf/comic_reader/settings）──
-const State = {
+// ── Legacy State（Alpine.reactive 驱动，与 appState 双向同步）──
+const State = Alpine.reactive({
   currentView: 'home',
   currentBook: null,
   chapters: [],
@@ -100,7 +121,7 @@ const State = {
   readingProgress: {},
   searchResults: [],
   currentSearchType: '',
-};
+});
 
 // ── 图片代理 ──
 function proxyUrl(url, referer) {
@@ -196,20 +217,10 @@ function setupBookCardTilt() {
   });
 }
 
-// ── 事件委托 ──
+// ── 事件委托（Alpine @click 接管搜索/书架，保留此处仅作降级）──
 function setupEventDelegation() {
-  document.getElementById('searchResults').addEventListener('click', (e) => {
-    const card = e.target.closest('.book-card');
-    if (!card) return;
-    const idx = parseInt(card.dataset.index);
-    if (!isNaN(idx) && State.searchResults[idx]) openBook(State.searchResults[idx]);
-  });
-  document.getElementById('homeShelf').addEventListener('click', (e) => {
-    const card = e.target.closest('.book-card');
-    if (!card) return;
-    const idx = parseInt(card.dataset.index);
-    if (!isNaN(idx) && State.shelf[idx]) openBook(State.shelf[idx]);
-  });
+  // 搜索 & 书架卡片点击现在由 Alpine x-for @click 处理
+  // 保留函数签名以兼容旧调用，不再注册 DOM 事件
 }
 
 // ── View helpers ──
@@ -256,36 +267,23 @@ async function doSearch() {
   const kw = document.getElementById('searchInput').value.trim();
   if (!kw) return;
   showView('search');
-  document.getElementById('resultCount').textContent = '搜索中...';
-  document.getElementById('searchResults').innerHTML = Array(4).fill(0).map(() =>
-    `<div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-lines"><div class="skeleton-line w-60"></div><div class="skeleton-line w-40"></div><div class="skeleton-line w-80"></div></div></div>`
-  ).join('');
+  State.searchResults = null;  // null → Alpine x-if 显示骨架屏
   try {
     let url = `/api/search?q=${encodeURIComponent(kw)}`;
     if (State.currentSearchType) url += `&type=${State.currentSearchType}`;
     const resp = await fetch(url);
     State.searchResults = await resp.json();
-    document.getElementById('resultCount').textContent = `共 ${State.searchResults.length} 条结果`;
-    renderSearchResults(State.searchResults);
   } catch (e) {
-    document.getElementById('searchResults').innerHTML = `<div class="empty"><div class="icon">${icon('ph:x-circle')}</div><p>搜索失败，请检查后端是否运行</p></div>`;
+    State.searchResults = [];
+    document.getElementById('searchResults').innerHTML = '<div class="empty"><div class="icon"><iconify-icon icon="ph:x-circle" inline></iconify-icon></div><p>搜索失败，请检查后端是否运行</p></div>';
   }
 }
 
 function renderSearchResults(results) {
-  const el = document.getElementById('searchResults');
-  if (!results.length) {
-    el.innerHTML = `<div class="empty"><div class="icon">${icon('ph:mailbox')}</div><p>没有找到相关书籍</p></div>`;
-    return;
-  }
-  // JS 动态设置 animation-delay（替代手写 n 个 nth-child）
-  const cards = results.map((b, i) => bookCard(b, i)).join('');
-  el.innerHTML = cards;
-  el.querySelectorAll('.book-card').forEach((card, i) => {
-    card.style.animationDelay = (i * 0.04) + 's';
-  });
-  // Motion One stagger 增强（可用时覆盖 CSS animation，弹簧曲线更有东方质感）
-  motionStaggerCards('#searchResults');
+  // 更新响应式 State → Alpine x-for 自动渲染 DOM
+  State.searchResults = results || [];
+  // 空状态占位由 Alpine x-for + template 处理
+  // Motion One stagger 由 appState.$watch('searchResults') 自动触发
 }
 
 function bookCard(b, i) {

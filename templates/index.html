@@ -74,7 +74,17 @@
           </div>
         </div>
         <div class="section-title"><iconify-icon icon="ph:flame" inline></iconify-icon>书架收藏</div>
-        <div id="homeShelf" class="book-grid"></div>
+        <div id="homeShelf" class="book-grid">
+          <!-- 空态 -->
+          <div class="empty" x-show="!shelf.length">
+            <div class="icon"><iconify-icon icon="ph:book-open-text" inline></iconify-icon></div>
+            <p>还没有收藏，搜索一本书试试</p>
+          </div>
+          <!-- 书卡 x-for -->
+          <template x-for="(b, i) in shelf" :key="b.source_url + b.book_url">
+            <div @click="openBook(b)" x-html="bookCardHTML(b, i)"></div>
+          </template>
+        </div>
       </div>
 
       <!-- Search Results -->
@@ -90,8 +100,29 @@
           <button class="type-tab" data-type="0" @click="setSearchType('0', $el)"><iconify-icon icon="ph:book-open-text" inline></iconify-icon>小说</button>
           <button class="type-tab" data-type="2" @click="setSearchType('2', $el)"><iconify-icon icon="ph:palette" inline></iconify-icon>漫画</button>
         </div>
-        <div class="section-title">搜索结果 <span class="count" id="resultCount"></span></div>
-        <div id="searchResults" class="book-grid"></div>
+        <div class="section-title">搜索结果 <span class="count" id="resultCount" x-text="'共 ' + searchResults.length + ' 条结果'"></span></div>
+        <div id="searchResults" class="book-grid">
+          <!-- 骨架屏（搜索中） -->
+          <template x-if="searchResults === null || searchResults === undefined">
+            <div class="skeleton-card" x-for="i in 4" :key="i">
+              <div class="skeleton-cover"></div>
+              <div class="skeleton-lines">
+                <div class="skeleton-line w-60"></div>
+                <div class="skeleton-line w-40"></div>
+                <div class="skeleton-line w-80"></div>
+              </div>
+            </div>
+          </template>
+          <!-- 空态 -->
+          <div class="empty" x-show="searchResults !== null && !searchResults.length">
+            <div class="icon"><iconify-icon icon="ph:mailbox" inline></iconify-icon></div>
+            <p>没有找到相关书籍</p>
+          </div>
+          <!-- 书卡 x-for -->
+          <template x-for="(b, i) in searchResults" :key="b.book_url || i">
+            <div @click="openBook(b)" x-html="bookCardHTML(b, i)"></div>
+          </template>
+        </div>
       </div>
 
       <!-- Book Detail -->
