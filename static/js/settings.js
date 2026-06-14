@@ -9,18 +9,33 @@ function applyReadingSettings() {
   const lh = S.getItem('lineHeight') || '2';
   const theme = S.getItem('theme') || '';
   const ff = S.getItem('fontFamily') || 'serif';
+  const rw = S.getItem('readerWidth') || '65ch';
+  const indent = S.getItem('paraIndent') || '2em';
+  const pspacing = S.getItem('paraSpacing') || '0.8em';
   setFontSize(fs);
   setLineHeight(lh);
   setTheme(theme);
   setFontFamily(ff);
+  setReadingWidth(rw, false);
+  setParagraphIndent(indent === '2em', false);
+  setParagraphSpacing(pspacing, false);
   const fontSizeVal = document.getElementById('fontSizeVal');
   const lineHeightVal = document.getElementById('lineHeightVal');
+  const paraSpacingVal = document.getElementById('paraSpacingVal');
   if (fontSizeVal) fontSizeVal.textContent = fs;
   if (lineHeightVal) lineHeightVal.textContent = lh;
-  // Sync theme buttons
+  if (paraSpacingVal) paraSpacingVal.textContent = pspacing;
+  // Sync font buttons
   document.querySelectorAll('.settings-panel .theme-btns button[data-font]').forEach(b => {
     b.classList.toggle('active', b.dataset.font === ff);
   });
+  // Sync width buttons
+  document.querySelectorAll('.settings-panel .width-btns button').forEach(b => {
+    b.classList.toggle('active', b.dataset.width === rw);
+  });
+  // Sync indent button
+  const indentBtn = document.getElementById('indentToggle');
+  if (indentBtn) indentBtn.classList.toggle('active', indent === '2em');
 }
 
 // ── 字号 ──
@@ -101,6 +116,39 @@ function setFontFamily(ff, el) {
   });
 }
 window._setFontFamily = setFontFamily;
+
+// ── 阅读宽度 ──
+function setReadingWidth(w, save) {
+  if (save !== false) S.setItem('readerWidth', w);
+  const reader = document.getElementById('readerContent');
+  const wrap = reader ? reader.parentElement : null;
+  if (wrap) wrap.style.maxWidth = w;
+  document.querySelectorAll('.width-btns button').forEach(b => {
+    b.classList.toggle('active', b.dataset.width === w);
+  });
+}
+window._setReadingWidth = setReadingWidth;
+
+// ── 段首缩进 ──
+function setParagraphIndent(on, save) {
+  const v = on ? '2em' : '0';
+  if (save !== false) S.setItem('paraIndent', v);
+  const reader = document.getElementById('readerContent');
+  if (reader) reader.style.setProperty('--reader-indent', v);
+  const btn = document.getElementById('indentToggle');
+  if (btn) btn.classList.toggle('active', on);
+}
+window._setParagraphIndent = setParagraphIndent;
+
+// ── 段间距 ──
+function setParagraphSpacing(v, save) {
+  if (save !== false) S.setItem('paraSpacing', v);
+  const reader = document.getElementById('readerContent');
+  if (reader) reader.style.setProperty('--reader-para-spacing', v);
+  const el = document.getElementById('paraSpacingVal');
+  if (el) el.textContent = v;
+}
+window._setParagraphSpacing = setParagraphSpacing;
 
 // ── 移动端：点击阅读区边缘翻页 ──
 document.addEventListener('click', (e) => {

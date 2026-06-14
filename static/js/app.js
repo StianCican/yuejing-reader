@@ -77,6 +77,15 @@ document.addEventListener('alpine:init', () => {
     setLineHeight(v) { window._setLineHeight(v); },
     setFontFamily(ff, el) { window._setFontFamily(ff, el); },
     setTheme(t) { window._setTheme(t); },
+    setReadingWidth(w) { window._setReadingWidth?.(w); },
+    toggleParagraphIndent() {
+      const btn = document.getElementById('indentToggle');
+      const on = !btn?.classList.contains('active');
+      window._setParagraphIndent?.(on);
+      const stateEl = document.getElementById('indentState');
+      if (stateEl) stateEl.textContent = on ? '开' : '关';
+    },
+    setParagraphSpacing(v) { window._setParagraphSpacing?.(v); },
   }));
 });
 

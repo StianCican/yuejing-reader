@@ -165,6 +165,18 @@
   <input type="range" id="fontSizeRange" min="14" max="28" value="18" @input="setFontSize($el.value)" aria-label="字号调节">
   <label for="lineHeightRange">行高：<span id="lineHeightVal">2.0</span></label>
   <input type="range" id="lineHeightRange" min="14" max="30" value="20" @input="setLineHeight($el.value)" aria-label="行高调节">
+  <label>阅读宽度</label>
+  <div class="width-btns theme-btns" id="widthBtns">
+    <button data-width="55ch" @click="setReadingWidth('55ch')">窄</button>
+    <button data-width="65ch" class="active" @click="setReadingWidth('65ch')">中</button>
+    <button data-width="80ch" @click="setReadingWidth('80ch')">宽</button>
+  </div>
+  <label>段首缩进</label>
+  <button id="indentToggle" class="btn btn-outline active" style="width:100%" @click="toggleParagraphIndent()">
+    <iconify-icon icon="ph:text-indent" inline></iconify-icon> 段首缩进：<span id="indentState">开</span>
+  </button>
+  <label for="paraSpacingRange">段间距：<span id="paraSpacingVal">0.8em</span></label>
+  <input type="range" id="paraSpacingRange" min="2" max="18" value="8" @input="setParagraphSpacing((Number($el.value)/10).toFixed(1)+'em')" aria-label="段间距调节">
   <label for="fontBtns">字体</label>
   <div class="font-btns theme-btns" id="fontBtns">
     <button data-font="serif" class="active" @click="setFontFamily('serif', $el)">衬线</button>
