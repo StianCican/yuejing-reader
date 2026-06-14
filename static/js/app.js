@@ -243,16 +243,8 @@ if (typeof Alpine === 'undefined') {
   document.body && document.body.appendChild(box);
   throw new Error('Alpine 未加载');
 }
-// Alpine 已就绪 —— 立刻同步注册组件，必须在 Alpine.start() 之前
-// （alpine.min.js 已打补丁屏蔽了末尾的 queueMicrotask(Alpine.start) 自启）
-registerAlpineComponents();
-
-if (typeof Alpine !== 'undefined' && typeof Alpine.start === 'function') {
-  console.log('[probe] manually starting Alpine');
-  Alpine.start();
-} else {
-  console.error('[probe] Alpine.start 不可用，页面无法初始化');
-}
+// ── Legacy State（必须在 registerAlpineComponents / Alpine.start 之前定义，
+//     否则 init() → loadProgress() 访问 State 时触发 TDZ ReferenceError）──
 const State = Alpine.reactive({
   currentView: 'home',
   currentBook: null,
@@ -266,6 +258,17 @@ const State = Alpine.reactive({
 });
 // 暴露到 window：Alpine appState 的 getter 通过 window.State 桥接
 window.State = State;
+
+// Alpine 已就绪 —— 立刻同步注册组件，必须在 Alpine.start() 之前
+// （alpine.min.js 已打补丁屏蔽了末尾的 queueMicrotask(Alpine.start) 自启）
+registerAlpineComponents();
+
+if (typeof Alpine !== 'undefined' && typeof Alpine.start === 'function') {
+  console.log('[probe] manually starting Alpine');
+  Alpine.start();
+} else {
+  console.error('[probe] Alpine.start 不可用，页面无法初始化');
+}
 
 // ── 图片代理 ──
 function proxyUrl(url, referer) {
