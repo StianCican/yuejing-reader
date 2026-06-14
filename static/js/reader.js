@@ -46,13 +46,14 @@ async function readChapter(idx, direction) {
     if (data.error) throw new Error(data.error);
 
     readerContent.className = 'reader-content';
-    hideComicModeToggle();  // 切回文本阅读时隐藏漫画模式按钮
+    if (typeof hideComicModeToggle === 'function') hideComicModeToggle();
     document.getElementById('chapterTitle').textContent = ch.name;
 
     const ctype = data.content_type || 'text';
     if (ctype === 'comic') {
       renderComicReader(data.images || [], ch.name, data.source_url || State.currentBook.source_url, data.diagnostics);
     } else {
+      console.log('[reader] content length:', (data.content || '').length, 'first 50:', (data.content || '').substring(0, 50));
       readerContent.innerHTML = renderContent(data.content);
     }
 

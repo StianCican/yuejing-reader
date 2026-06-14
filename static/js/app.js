@@ -372,6 +372,7 @@ function setupEventDelegation() {
 
 // ── View helpers ──
 function showView(id) {
+  console.log('[showView] switching to', id, 'alpine:', !!window._alpine);
   State.currentView = id;
   const alpine = window._alpine;
   if (alpine) {
