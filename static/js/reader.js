@@ -56,14 +56,14 @@ async function readChapter(idx, direction) {
       readerContent.innerHTML = renderContent(data.content);
     }
 
-    const isFirst = idx <= 0;
-    const isLast = idx >= State.chapters.length - 1;
-    document.getElementById('prevChapter').disabled = isFirst;
-    document.getElementById('nextChapter').disabled = isLast;
+    window._isFirst = idx <= 0;
+    window._isLast = idx >= State.chapters.length - 1;
+    document.getElementById('prevChapter').disabled = window._isFirst;
+    document.getElementById('nextChapter').disabled = window._isLast;
     const pb = document.getElementById('prevChapterBottom');
     const nb = document.getElementById('nextChapterBottom');
-    if (pb) pb.disabled = isFirst;
-    if (nb) nb.disabled = isLast;
+    if (pb) pb.disabled = window._isFirst;
+    if (nb) nb.disabled = window._isLast;
 
     // 进度条 + 章节刻度
     const pct = Math.round((idx + 1) / State.chapters.length * 100);
@@ -133,7 +133,7 @@ async function readChapter(idx, direction) {
   }
 
   // 章节读完标记
-  if (isLast) {
+  if (window._isLast) {
     const done = document.getElementById('chapterDone');
     if (done) {
       done.classList.add('show');
