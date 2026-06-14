@@ -129,7 +129,18 @@
         <div class="detail-header" id="detailHeader"></div>
         <div class="detail-actions" id="detailActions"></div>
         <div class="chapter-count" id="chapterCount"></div>
-        <div class="chapter-list" id="chapterList"></div>
+        <div class="chapter-list" id="chapterList">
+          <!-- 诊断信息（漫画源无章节时） -->
+          <div x-show="chapterDiagHTML" x-html="chapterDiagHTML"></div>
+          <!-- 章节 x-for -->
+          <template x-for="(ch, i) in chapters" :key="ch.url || i">
+            <div class="chapter-item"
+              :class="{ 'current': isChapterCurrent(i), 'read': isChapterRead(i) }"
+              @click="readChapter(i)">
+              <span x-text="ch.name"></span>
+            </div>
+          </template>
+        </div>
       </div>
 
       <!-- Reader -->

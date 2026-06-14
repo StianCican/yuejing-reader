@@ -28,6 +28,19 @@ document.addEventListener('alpine:init', () => {
       return '';
     },
 
+    // 章节列表辅助（供 x-for 使用）
+    get chapterDiagHTML() { return window.State?._chapterDiagHTML || ''; },
+    get chapterSavedIdx() {
+      const b = window.State?.currentBook;
+      if (!b) return -1;
+      const bk = getBookKey(b);
+      const saved = window.State?.readingProgress[bk];
+      return (saved !== undefined && saved >= 0) ? saved : -1;
+    },
+    isChapterRead(i) { return this.chapterSavedIdx >= 0 && i < this.chapterSavedIdx; },
+    isChapterCurrent(i) { return this.chapterSavedIdx >= 0 && i === this.chapterSavedIdx; },
+    readChapter(idx) { if (typeof window.readChapter === 'function') window.readChapter(idx); },
+
     init() {
       window._alpine = this;
       loadShelf();
@@ -361,6 +374,9 @@ function renderDetail() {
     ${State.chapters.length ? `<button class="btn btn-primary" onclick="readChapter(${hasProgress ? savedIdx : 0})">${hasProgress ? icon('ph:book-open-text') + ' 继续阅读（第'+(savedIdx+1)+'章）' : icon('ph:book-open-text') + ' 开始阅读'}</button>` : ''}
     <button class="btn btn-outline" onclick="toggleShelf()">${inShelf ? icon('ph:heart-break') + ' 取消收藏' : icon('ph:heart') + ' 加入书架'}</button>`;
   document.getElementById('chapterCount').innerHTML = `${icon('ph:bookmarks')} 章节目录（${State.chapters.length} 章）`;
+  // 诊断 HTML → 响应式状态，Alpine x-for 自动渲染
+  State._chapterDiagHTML = diagHtml;
+  State.chapters = [...State.chapters];
   let diagHtml = '';
   if (b.source_type === 2 && !State.chapters.length && b.diagnostics) {
     const d = b.diagnostics;
@@ -387,14 +403,10 @@ function renderDetail() {
     diagHtml += '<div class="detail-diag-meta">源：' + esc(d.source_name || '') + ' | 分组：' + esc(d.source_group || '') + '</div>';
     diagHtml += '</div>';
   }
-  document.getElementById('chapterList').innerHTML = diagHtml + State.chapters.map((ch, i) => {
-    const isCurrent = hasProgress && i === savedIdx;
-    const isRead = hasProgress && i < savedIdx;
-    let cls = 'chapter-item';
-    if (isCurrent) cls += ' current';
-    else if (isRead) cls += ' read';
-    return `<div class="${cls}" onclick="readChapter(${i})">${esc(ch.name)}</div>`;
-  }).join('');
+  // 章节列表由 Alpine x-for 渲染（#chapterList 模板）
+  // _chapterDiagHTML 存储诊断 HTML，chapters 数组驱动 x-for
+  // isChapterCurrent / isChapterRead 控制 CSS class
+  // @click="readChapter(i)" 替代 inline onclick
 }
 
 // ── Sources ──
