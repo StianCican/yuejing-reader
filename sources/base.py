@@ -389,6 +389,12 @@ class BaseSource:
 
         diag['rule_match'] = len(items) > 0
         if not items:
+            # 主要规则失败 → 启发式回退：搜索含大量链接的区域
+            items = _heuristic_find_chapters(soup)
+            if items:
+                diag['rule_match'] = True
+                diag['chapter_list_rule'] += ' (heuristic fallback)'
+        if not items:
             diag['anti_bot'] = inspect_anti_bot(soup, cl_sel_raw, url)
             self._last_detail_diag = diag
             return []
@@ -415,6 +421,39 @@ class BaseSource:
 # ════════════════════════════════════════════════════════════════
 # 辅助函数
 # ════════════════════════════════════════════════════════════════
+
+def _heuristic_find_chapters(soup):
+    """当 Legado 规则未匹配时，启发式搜索页面中的章节列表。
+
+    策略：找到包含最多 <a> 标签的容器元素，返回这些 <a> 作为候选项。
+    通常章节列表就是页面中链接密度最高的区域。
+    返回 list[Tag] 或空列表。
+    """
+    candidates = []
+    # 遍历所有块级容器
+    for tag in soup.find_all(['ul', 'ol', 'div', 'section', 'nav']):
+        links = tag.find_all('a', href=True)
+        if len(links) >= 3:
+            # 过滤掉明显的导航/页脚链接
+            valid = [a for a in links if not any(
+                kw in (a.get_text().strip().lower() or '')
+                for kw in ['首页', '上一页', '下一页', '登录', '注册', '首页', '末页']
+            )]
+            if len(valid) >= 3:
+                candidates.append((len(valid), tag, valid))
+    if not candidates:
+        # 策略 2：找任何包含 3+ 链接且关键词含 chapter/list/toc 的元素
+        for tag in soup.find_all(True):
+            cls_id = str(tag.get('class', '')) + str(tag.get('id', ''))
+            if any(kw in cls_id.lower() for kw in ('chapter', 'list', 'catalog', 'toc', 'menu', 'ml')):
+                links = tag.find_all('a', href=True)
+                if len(links) >= 3:
+                    candidates.append((len(links), tag, links))
+    if not candidates:
+        return []
+    # 返回链接最多的容器中的 <a> 元素
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [{'tag': a} for a in candidates[0][2]]
 
 def _chapters_css_extract(soup, rule, diag):
     """从 BeautifulSoup 中用 Legado CSS 选择器提取章节列表，返回 list[dict] 或 None"""
@@ -963,7 +1002,7 @@ def _extract_single_page_images(source, url, cr, content_rule, http_base, source
     # ── 控制台日志（仅异常时）──
     diag = result['diagnostics']
     if diag['raw_count'] == 0 or diag['junk_dropped'] > 0:
-        _print_comic_diag(source_name, diag, ch_url)
+        _print_comic_diag(source_name, diag, url)
 
     return result
 
