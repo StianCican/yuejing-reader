@@ -223,23 +223,6 @@ class BaseSource:
             return self._chapters_css(toc_url, soup)
         return self._chapters_json(toc_url)
 
-def _chapters_css_extract(soup, rule, diag):
-    """从 BeautifulSoup 中用 Legado CSS 选择器提取章节列表，返回 list[dict] 或 None"""
-    from rules.css_conv import css_conv
-    for p in (rule.split('||') if '||' in rule else [rule]):
-        p = p.strip()
-        if not p:
-            continue
-        css = css_conv(p)
-        try:
-            items = soup.select(css)
-            if items:
-                diag['rule_match'] = True
-                return [{'tag': item} for item in items]
-        except Exception:
-            continue
-    return None
-
     def _chapters_json(self, toc_url):
         """纯 JSON API 目录解析"""
         url = _join_url(self.http_base, toc_url) if toc_url else ''
@@ -428,6 +411,27 @@ def _chapters_css_extract(soup, rule, diag):
         """获取章节图片列表（漫画等），返回 {images: [...], diagnostics: {...}}"""
         return _fetch_chapter_images(self, ch_url)
 
+
+# ════════════════════════════════════════════════════════════════
+# 辅助函数
+# ════════════════════════════════════════════════════════════════
+
+def _chapters_css_extract(soup, rule, diag):
+    """从 BeautifulSoup 中用 Legado CSS 选择器提取章节列表，返回 list[dict] 或 None"""
+    from rules.css_conv import css_conv
+    for p in (rule.split('||') if '||' in rule else [rule]):
+        p = p.strip()
+        if not p:
+            continue
+        css = css_conv(p)
+        try:
+            items = soup.select(css)
+            if items:
+                diag['rule_match'] = True
+                return [{'tag': item} for item in items]
+        except Exception:
+            continue
+    return None
 
 # ════════════════════════════════════════════════════════════════
 # 内容获取（非类方法，由 BaseSource.chapter_content 调用）
