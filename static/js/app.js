@@ -451,7 +451,8 @@ function bookCard(b, i) {
   const typeLabels = {0: `${icon('ph:book-open-text')} 小说`, 1: `${icon('ph:headphones')} 听书`, 2: `${icon('ph:palette')} 漫画`, 3: `${icon('ph:folder')} 文件`, 4: `${icon('ph:film-strip')} 影视`};
   const typeBadge = b.source_type != null ? `<span class="type-badge">${typeLabels[b.source_type] || ''}</span>` : '';
   const cover = b.cover ? `<img src="${esc(proxyUrl(b.cover, b.source_url))}" onerror="this.parentElement.innerHTML='📕'">` : icon('ph:book');
-  const sourceHtml = b.source_name ? `<div class="source"><span class="dot"></span>${esc(b.source_name)}${typeBadge}</div>` : '';
+  const statusClass = {ok: 'on', partial: 'partial', dead: 'off'}[b.source_status] || '';
+  const sourceHtml = b.source_name ? `<div class="source"><span class="dot ${statusClass}"></span>${esc(b.source_name)}${typeBadge}</div>` : '';
   return `<div class="book-card" data-index="${i}">
     <div class="cover"><div class="placeholder">${cover}</div></div>
     <div class="meta">

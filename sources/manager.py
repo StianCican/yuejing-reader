@@ -333,8 +333,10 @@ class SourceManager:
             try:
                 results = src.search(kw, page)
                 st = getattr(src, 'source_type', 0)
+                hs = self.health.get(src.base, {}).get('status') or ''
                 for r in results:
                     r['source_type'] = st
+                    r['source_status'] = hs
                 if results:
                     self._fail_count[src.base] = 0
                 return results
