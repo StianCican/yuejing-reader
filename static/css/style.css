@@ -245,8 +245,8 @@ main.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .content{flex:1;overflow-y:auto;padding:var(--space-lg)}
 
 /* ── Views（Alpine x-show 驱动；display 由 Alpine 管理）── */
-/* 兜底：Alpine 接管前默认隐藏所有 view，只显示带 active 的；防止"一直加载"幻觉 */
-.view{display:none}
+/* 注意：.view 不设 display:none，否则 Alpine x-show 设置 inline style 会被
+   CSS 覆盖，导致搜索结果等页面切换后依然不可见 */
 .view.active{display:block}
 
 /* ── Alpine x-transition 自定义 CSS 类（无 Tailwind 方案）── */
