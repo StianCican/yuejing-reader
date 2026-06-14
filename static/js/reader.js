@@ -46,6 +46,7 @@ async function readChapter(idx, direction) {
     if (data.error) throw new Error(data.error);
 
     readerContent.className = 'reader-content';
+    hideComicModeToggle();  // 切回文本阅读时隐藏漫画模式按钮
     document.getElementById('chapterTitle').textContent = ch.name;
 
     const ctype = data.content_type || 'text';
@@ -151,8 +152,14 @@ document.addEventListener('keydown', (e) => {
   if (State.currentView !== 'reader') return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   switch (e.key) {
-    case 'ArrowLeft':  navChapter(-1); break;
-    case 'ArrowRight': navChapter(1);  break;
+    case 'ArrowLeft':
+      if (typeof comicMode !== 'undefined' && comicMode === 'page') comicPrevPage();
+      else navChapter(-1);
+      break;
+    case 'ArrowRight':
+      if (typeof comicMode !== 'undefined' && comicMode === 'page') comicNextPage();
+      else navChapter(1);
+      break;
     case 'Escape':
       if (State.currentBook) saveScrollPos(getBookKey(State.currentBook));
       showDetail();

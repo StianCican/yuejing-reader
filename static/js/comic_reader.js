@@ -4,15 +4,22 @@
 
 let comicImages = [];
 let comicLoaded = new Set();
+let comicMode = 'scroll';   // 'scroll' | 'page'
+let comicCurrentPage = 0;
+let _comicModeToggle = null;
 
 function renderComicReader(images, title, sourceUrl, diagnostics) {
   comicImages = images || [];
   comicLoaded = new Set();
+  comicCurrentPage = 0;  // 新漫画重置页码
   const el = document.getElementById('readerContent');
   el.className = 'comic-reader';
 
   // 诊断面板
   renderDiagnosticsPanel(diagnostics);
+
+  // 模式切换按钮（恢复上次模式，CSS class 先就位）
+  ensureComicModeToggle();
 
   if (!comicImages.length) {
     el.innerHTML = `<div class="comic-empty"><span>${icon('ph:image')}</span><p>未提取到图片</p></div>`;
@@ -35,6 +42,11 @@ function renderComicReader(images, title, sourceUrl, diagnostics) {
 
   // 懒加载
   initComicLazyLoad();
+
+  // DOM 就位后应用翻页模式（确保 .comic-page 元素存在）
+  if (comicMode === 'page') {
+    showComicPage(comicCurrentPage);
+  }
 }
 
 function initComicLazyLoad() {
@@ -62,8 +74,75 @@ function initComicLazyLoad() {
 
 // ── 漫画滚动辅助：键盘翻页 ──
 function comicScrollPage(dir) {
+  if (comicMode === 'page') {
+    if (dir > 0) comicNextPage();
+    else comicPrevPage();
+    return;
+  }
   const vh = window.innerHeight * 0.85;
   window.scrollBy({ top: dir * vh, behavior: 'smooth' });
+}
+
+// ── 翻页模式 ──
+function ensureComicModeToggle() {
+  // 创建或显示模式切换按钮
+  if (!_comicModeToggle) {
+    _comicModeToggle = document.createElement('button');
+    _comicModeToggle.className = 'comic-mode-toggle';
+    _comicModeToggle.onclick = () => setComicMode(comicMode === 'scroll' ? 'page' : 'scroll');
+    document.body.appendChild(_comicModeToggle);
+  }
+  _comicModeToggle.classList.add('visible');
+  updateComicModeToggleLabel();
+  // 恢复上次模式
+  const saved = S.getItem('comicMode');
+  if (saved) setComicMode(saved);
+}
+function updateComicModeToggleLabel() {
+  if (!_comicModeToggle) return;
+  _comicModeToggle.innerHTML = comicMode === 'page'
+    ? '<iconify-icon icon="ph:arrows-left-right" inline></iconify-icon> 滚动模式'
+    : '<iconify-icon icon="ph:rectangle" inline></iconify-icon> 翻页模式';
+}
+function setComicMode(mode) {
+  comicMode = mode;
+  const el = document.getElementById('readerContent');
+  if (el) {
+    el.classList.toggle('page-mode', mode === 'page');
+    if (mode === 'page') {
+      // 找到当前可见页的索引
+      if (comicCurrentPage < 0 || comicCurrentPage >= comicImages.length) comicCurrentPage = 0;
+      showComicPage(comicCurrentPage);
+    } else {
+      // 回到滚动模式：显示全部页面
+      el.querySelectorAll('.comic-page').forEach(p => { p.style.display = ''; p.classList.remove('active'); });
+      el.querySelector('#comicPage' + comicCurrentPage)?.scrollIntoView();
+    }
+  }
+  updateComicModeToggleLabel();
+  S.setItem('comicMode', mode);
+}
+function showComicPage(idx) {
+  if (idx < 0 || idx >= comicImages.length) return;
+  comicCurrentPage = idx;
+  const el = document.getElementById('readerContent');
+  if (!el) return;
+  el.querySelectorAll('.comic-page').forEach((p, i) => {
+    p.classList.toggle('active', i === idx);
+    p.style.display = i === idx ? '' : 'none';
+  });
+  // 强制加载当前页图片
+  const img = el.querySelector('#comicPage' + idx + ' .comic-img');
+  if (img && img.dataset.src && !comicLoaded.has(idx)) {
+    comicLoaded.add(idx);
+    img.src = img.dataset.src;
+    img.onload = () => { img.classList.add('loaded'); if (img.previousElementSibling) img.previousElementSibling.style.display = 'none'; };
+  }
+}
+function comicNextPage() { showComicPage(comicCurrentPage + 1); }
+function comicPrevPage() { showComicPage(comicCurrentPage - 1); }
+function hideComicModeToggle() {
+  if (_comicModeToggle) _comicModeToggle.classList.remove('visible');
 }
 
 // ── 诊断面板 ──

@@ -133,6 +133,7 @@ document.addEventListener('alpine:init', () => {
       this.currentView = id;
       if (id !== 'reader') {
         document.querySelectorAll('.diagnostics-trigger,.diagnostics-panel').forEach(d => d.remove());
+        if (typeof hideComicModeToggle === 'function') hideComicModeToggle();
       }
     },
     showDetail() {
