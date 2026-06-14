@@ -61,6 +61,12 @@ async function readChapter(idx, direction) {
   try {
     const params = new URLSearchParams({source: State.currentBook.source_url, url: ch.url});
     const resp = await fetch(`/api/chapter?${params}`);
+    // Content-Type 守卫：防止后端返回 HTML 500 页时 JSON 解析崩溃
+    const ct = resp.headers.get('content-type') || '';
+    if (!resp.ok && !ct.includes('application/json')) {
+      const text = await resp.text();
+      throw new Error('服务器错误 (HTTP ' + resp.status + ')：' + (text.substring(0, 150)));
+    }
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
 

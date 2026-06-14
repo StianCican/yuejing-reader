@@ -204,42 +204,61 @@ def api_chapter():
     stype = getattr(src, 'source_type', 0)
     # 漫画：返回图片列表 + 诊断信息
     if stype == 2:
-        imgs = src.chapter_images(ch_url)
-        # 兼容新旧返回格式：新格式为 {images, diagnostics}，旧格式为 list
-        if isinstance(imgs, dict):
-            return jsonify(content_type='comic', images=imgs['images'],
-                           source_url=source_url, count=len(imgs['images']),
-                           diagnostics=imgs['diagnostics'])
-        else:
-            return jsonify(content_type='comic', images=imgs,
-                           source_url=source_url, count=len(imgs))
+        try:
+            imgs = src.chapter_images(ch_url)
+            if isinstance(imgs, dict):
+                return jsonify(content_type='comic', images=imgs['images'],
+                               source_url=source_url, count=len(imgs['images']),
+                               diagnostics=imgs['diagnostics'])
+            else:
+                return jsonify(content_type='comic', images=imgs,
+                               source_url=source_url, count=len(imgs))
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify(error=str(e), content_type='comic',
+                           source_url=source_url, ch_url=ch_url), 500
     # 默认：文本
-    content = src.chapter_content(ch_url)
-    # 诊断信息
-    diag = None
-    raw_content_rule = getattr(src, 'content_r', {}).get('content', '')
-    if content and (content.startswith('$.') or '<js>' in content):
-        diag = {
-            'reason': '规则未解析 — 源站返回格式可能与规则不匹配',
-            'raw_rule': raw_content_rule,
-            'returned_as_content': content[:200],
-            'ch_url': ch_url,
-        }
-        content = ''
-    elif not content or not content.strip():
-        diag = {
-            'reason': '内容为空 — 可能反爬、源站限制或章节不存在',
-            'raw_rule': raw_content_rule,
-            'ch_url': ch_url,
-        }
-    elif len(content) < 80:
-        diag = {
-            'reason': '内容异常短（' + str(len(content)) + ' 字符）— 可能为错误页或反爬拦截',
-            'raw_rule': raw_content_rule,
-            'returned_as_content': content[:200],
-            'ch_url': ch_url,
-        }
-    return jsonify(content_type='text', content=content, diagnostics=diag)
+    try:
+        content = src.chapter_content(ch_url)
+        # 诊断信息
+        diag = None
+        raw_content_rule = getattr(src, 'content_r', {}).get('content', '')
+        # HTML 反爬页检测
+        if content and (content.strip().startswith('<!DOCTYPE') or content.strip().startswith('<html')):
+            diag = {
+                'reason': '源站返回了 HTML 页面（可能为反爬拦截或 CloudFlare 挑战）',
+                'raw_rule': raw_content_rule,
+                'returned_as_content': content[:200],
+                'ch_url': ch_url,
+            }
+            content = ''
+        elif content and (content.startswith('$.') or '<js>' in content):
+            diag = {
+                'reason': '规则未解析 — 源站返回格式可能与规则不匹配',
+                'raw_rule': raw_content_rule,
+                'returned_as_content': content[:200],
+                'ch_url': ch_url,
+            }
+            content = ''
+        elif not content or not content.strip():
+            diag = {
+                'reason': '内容为空 — 可能反爬、源站限制或章节不存在',
+                'raw_rule': raw_content_rule,
+                'ch_url': ch_url,
+            }
+        elif len(content) < 80:
+            diag = {
+                'reason': '内容异常短（' + str(len(content)) + ' 字符）— 可能为错误页或反爬拦截',
+                'raw_rule': raw_content_rule,
+                'returned_as_content': content[:200],
+                'ch_url': ch_url,
+            }
+        return jsonify(content_type='text', content=content, diagnostics=diag)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify(error=str(e), content_type='text', ch_url=ch_url), 500
 
 
 @app.route('/api/proxy')
