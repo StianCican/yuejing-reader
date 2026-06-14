@@ -31,7 +31,24 @@
       <button :class="{ 'active': sidebarTab === 'sources' }" @click="sidebarTab = 'sources'" aria-label="源管理"><iconify-icon icon="ph:gear-six" inline></iconify-icon>源管理</button>
     </nav>
     <div class="sidebar-content">
-      <div id="shelfPanel" class="sidebar-section" x-show="sidebarTab === 'shelf'"></div>
+      <div id="shelfPanel" class="sidebar-section" x-show="sidebarTab === 'shelf'">
+        <h3 x-show="!shelf.length" style="display:none">我的书架</h3>
+        <!-- 空态 -->
+        <div class="empty" style="padding:20px" x-show="!shelf.length">
+          <p>书架空空如也</p>
+        </div>
+        <!-- 书架项 x-for -->
+        <template x-for="b in shelf" :key="b.source_url + b.book_url">
+          <div class="shelf-item" @click="openBook(b)">
+            <div class="cover" x-html="shelfCoverHTML(b)"></div>
+            <div class="info">
+              <div class="name" x-text="b.name"></div>
+              <div class="author" x-text="b.author || ''"></div>
+              <div class="progress-badge" x-show="shelfProgressHTML(b)" x-html="shelfProgressHTML(b)"></div>
+            </div>
+          </div>
+        </template>
+      </div>
       <div id="sourcesPanel" class="sidebar-section" x-show="sidebarTab === 'sources'"></div>
     </div>
   </aside>

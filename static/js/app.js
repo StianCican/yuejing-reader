@@ -41,6 +41,24 @@ document.addEventListener('alpine:init', () => {
     isChapterCurrent(i) { return this.chapterSavedIdx >= 0 && i === this.chapterSavedIdx; },
     readChapter(idx) { if (typeof window.readChapter === 'function') window.readChapter(idx); },
 
+    // 侧边栏书架辅助（供 x-for 使用）
+    shelfProgressHTML(b) {
+      const bk = getBookKey(b);
+      const progress = window.State?.readingProgress[bk];
+      if (progress === undefined) return '';
+      const ch = typeof progress === 'object' ? progress.chapter : progress;
+      const total = typeof progress === 'object' ? progress.total : null;
+      if (total && total > 0) {
+        const pct = Math.round((ch + 1) / total * 100);
+        return icon('ph:book-open-text') + ' ' + pct + '%（' + (ch+1) + '/' + total + '章）';
+      }
+      return icon('ph:book-open-text') + ' 已读 ' + (ch+1) + ' 章';
+    },
+    shelfCoverHTML(b) {
+      if (b.cover) return '<img src="' + esc(proxyUrl(b.cover, b.source_url)) + '" onerror="this.parentElement.innerHTML='📕'">';
+      return icon('ph:book');
+    },
+
     init() {
       window._alpine = this;
       loadShelf();
