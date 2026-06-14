@@ -387,17 +387,11 @@ function setupEventDelegation() {
 
 // ── View helpers ──
 function showView(id) {
-  console.log('[showView] switching to', id, 'alpine:', !!window._alpine);
   State.currentView = id;
   const alpine = window._alpine;
   if (alpine) {
     alpine.currentView = id;
   }
-  // DOM 兜底：无论 Alpine getter 桥是否触发了 x-show 更新，直接确保目标视图可见
-  // Alpine 的 x-show 最终也要操作 style.display，这里直接做更可靠
-  document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
-  const el = document.getElementById(id + 'View');
-  if (el) el.style.display = '';
 }
 function showHome() {
   showView('home');
