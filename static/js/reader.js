@@ -4,7 +4,7 @@
 
 // ── 段落式正文渲染 ──
 function renderContent(text) {
-  if (!text) return '<p>（内容为空）</p>';
+  if (!text) return '<div class="empty"><div class="icon"><iconify-icon icon="ph:warning-circle" inline></iconify-icon></div><p>该章节内容为空<br><small>可能是源站限制或章节已下架</small></p></div>';
   const paragraphs = text.split(/\n\s*\n/);
   return paragraphs
     .map(p => `<p>${esc(p.trim()).replace(/\n/g, '<br>')}</p>`)
