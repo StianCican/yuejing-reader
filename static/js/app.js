@@ -2,11 +2,52 @@
    app.js — Alpine 全局状态、导航、搜索、详情、源管理、Toast
    ════════════════════════════════════════════════════════════════ */
 
-const S = localStorage;
+// ── 启动诊断探针：把 JS 异常显示到页面上 ──
+window.addEventListener('error', (e) => {
+  try {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c62828;color:#fff;padding:12px;z-index:99999;font:12px/1.4 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto';
+    box.textContent = '[JS 错误] ' + (e.message || e.error?.message || 'unknown') + '\n' + (e.filename || '') + ':' + (e.lineno || 0) + '\n' + (e.error?.stack || '');
+    document.body.appendChild(box);
+  } catch (_) {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef6c00;color:#fff;padding:12px;z-index:99999;font:12px/1.4 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto';
+    box.textContent = '[Promise 错误] ' + (e.reason?.message || e.reason || 'unknown') + '\n' + (e.reason?.stack || '');
+    document.body.appendChild(box);
+  } catch (_) {}
+});
+
+const S = (() => {
+  try {
+    const t = '__test__';
+    localStorage.setItem(t, t);
+    localStorage.removeItem(t);
+    return localStorage;
+  } catch (_) {
+    // Edge 严格模式 / 隐私模式 / 沙箱可能拒绝 localStorage 访问 —— 用内存兜底
+    console.warn('[probe] localStorage 不可用，启用内存兜底');
+    const m = new Map();
+    return {
+      getItem: k => m.has(k) ? m.get(k) : null,
+      setItem: (k, v) => m.set(k, String(v)),
+      removeItem: k => m.delete(k),
+      clear: () => m.clear(),
+    };
+  }
+})();
 let toastId = 0;
 
 // ── Alpine 全局状态 ──
-document.addEventListener('alpine:init', () => {
+// 关键：不能用 alpine:init 监听器 —— alpinejs.min.js 是 defer，按文档顺序在 app.js
+// 之后执行，所以等浏览器解析到这一行时，Alpine 还没加载、还没派发过任何事件；
+// 但 Alpine 一旦加载就会立刻 dispatch 'alpine:init'，listener 错过这次再也没机会
+// 触发。改成定义一个 alpineRegister 函数，等下面 typeof Alpine 检查到对象后立刻
+// 同步调用，把 appState 数据工厂注册上去。
+function registerAlpineComponents() {
+  console.log('[probe] registering Alpine components');
   Alpine.data('appState', () => ({
     currentView: 'home',
     sidebarOpen: false,
@@ -181,9 +222,19 @@ document.addEventListener('alpine:init', () => {
     },
     setParagraphSpacing(v) { window._setParagraphSpacing?.(v); },
   }));
-});
+}
 
 // ── Legacy State（Alpine.reactive 驱动，与 appState 双向同步）──
+console.log('[probe] before Alpine.reactive, typeof Alpine =', typeof Alpine);
+if (typeof Alpine === 'undefined') {
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c62828;color:#fff;padding:12px;z-index:99999;font:12px/1.4 monospace';
+  box.textContent = '[致命] Alpine 未定义 — alpinejs.min.js 可能加载失败或顺序错';
+  document.body && document.body.appendChild(box);
+  throw new Error('Alpine 未加载');
+}
+// Alpine 已就绪 —— 立刻同步注册组件，必须在 Alpine.start() 之前
+registerAlpineComponents();
 const State = Alpine.reactive({
   currentView: 'home',
   currentBook: null,
