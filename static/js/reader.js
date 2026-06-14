@@ -24,8 +24,9 @@ async function readChapter(idx, direction) {
 
   const readerContent = document.getElementById('readerContent');
 
-  // 3D 翻页：先翻出
+  // 3D 翻页：先翻出（纸张投影）
   if (oldIdx >= 0 && window._motionAnimate) {
+    readerContent.classList.add('flipping');
     try {
       await window._motionAnimate(
         readerContent,
@@ -33,6 +34,7 @@ async function readChapter(idx, direction) {
         { duration: 0.2, easing: [0.65, 0, 0.35, 1] }
       ).finished;
     } catch(e) { /* motion not available, proceed */ }
+    readerContent.classList.remove('flipping');
   }
 
   // 加载内容
@@ -62,10 +64,31 @@ async function readChapter(idx, direction) {
     if (pb) pb.disabled = isFirst;
     if (nb) nb.disabled = isLast;
 
-    // 进度条 + 百分比浮标
+    // 进度条 + 章节刻度
     const pct = Math.round((idx + 1) / State.chapters.length * 100);
     const progressFill = document.getElementById('progressFill');
-    if (progressFill) progressFill.style.width = pct + '%';
+    if (progressFill) {
+      progressFill.style.width = pct + '%';
+      // 生成章节刻度（首次或章节数变化时重建）
+      const ticksId = 'progressTicks';
+      let ticksEl = document.getElementById(ticksId);
+      if (!ticksEl || parseInt(ticksEl.dataset.total) !== State.chapters.length) {
+        if (!ticksEl) {
+          ticksEl = document.createElement('div');
+          ticksEl.id = ticksId;
+          ticksEl.className = 'reader-progress-ticks';
+          progressFill.appendChild(ticksEl);
+        }
+        ticksEl.dataset.total = State.chapters.length;
+        const total = State.chapters.length;
+        const tickCount = Math.min(total, 20);
+        let ticksHTML = '';
+        for (let t = 1; t <= tickCount; t++) {
+          ticksHTML += '<span class="reader-progress-tick" style="left:' + Math.round(t / tickCount * 100) + '%"></span>';
+        }
+        ticksEl.innerHTML = ticksHTML;
+      }
+    }
     const progressPct = document.getElementById('progressPct');
     if (progressPct) {
       progressPct.textContent = pct + '%';
@@ -93,10 +116,11 @@ async function readChapter(idx, direction) {
     return;
   }
 
-  // 3D 翻页：翻入
+  // 3D 翻页：翻入（纸张投影）
   if (window._motionAnimate) {
     readerContent.style.transform = `rotateY(${-direction * 90}deg)`;
     readerContent.style.opacity = '0.3';
+    readerContent.classList.add('flip-in');
     try {
       await window._motionAnimate(
         readerContent,
@@ -104,6 +128,7 @@ async function readChapter(idx, direction) {
         { duration: 0.3, easing: [0.16, 1, 0.3, 1] }
       ).finished;
     } catch(e) {}
+    readerContent.classList.remove('flip-in');
   }
 
   // 章节读完标记
@@ -144,8 +169,12 @@ document.addEventListener('keydown', (e) => {
   try {
     const mod = await import('/static/js/motion-import.js');
     window._motionAnimate = mod.animate;
+    window._motionStagger = mod.stagger;
+    window._motionSpring = mod.spring;
   } catch(e) {
     // Motion One 不可用时降级为无翻页动画
     window._motionAnimate = null;
+    window._motionStagger = null;
+    window._motionSpring = null;
   }
 })();
