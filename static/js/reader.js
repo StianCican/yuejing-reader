@@ -6,8 +6,9 @@
 // 诊断面板 HTML（独立函数，无论内容是否为空都可追加到内容底部）
 function diagPanelHTML(diagnostics) {
   if (!diagnostics) return '';
-  let h = '<div class="diagnostics-panel" style="margin-top:24px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6;border-left:3px solid var(--amber)">';
-  h += '<div style="font-weight:600;margin-bottom:4px;color:var(--amber)"><iconify-icon icon="ph:warning" inline></iconify-icon> 诊断信息</div>';
+  let h = '<div class="diagnostics-panel" style="position:relative;margin-top:24px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6;border-left:3px solid var(--amber)">';
+  h += '<button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1" title="关闭">×</button>';
+  h += '<div style="font-weight:600;margin-bottom:4px;color:var(--amber);padding-right:20px"><iconify-icon icon="ph:warning" inline></iconify-icon> 诊断信息</div>';
   if (diagnostics.reason) h += '<div>' + esc(diagnostics.reason) + '</div>';
   if (diagnostics.raw_rule) h += '<div>规则：<code>' + esc(diagnostics.raw_rule) + '</code></div>';
   if (diagnostics.returned_as_content) h += '<div>返回内容预览：<code>' + esc(diagnostics.returned_as_content) + '</code></div>';
@@ -39,16 +40,16 @@ async function readChapter(idx, direction) {
 
   const readerContent = document.getElementById('readerContent');
 
-  // 3D 翻页：先翻出（纸张投影）
+  // 3D 翻页：先翻出（纸张投影）—— 提速至 0.1s
   if (oldIdx >= 0 && window._motionAnimate) {
     readerContent.classList.add('flipping');
     try {
       await window._motionAnimate(
         readerContent,
-        { transform: `rotateY(${direction * 90}deg)`, opacity: [1, 0.3] },
-        { duration: 0.2, easing: [0.65, 0, 0.35, 1] }
+        { opacity: [1, 0.6], transform: `rotateY(${direction * 45}deg)` },
+        { duration: 0.1, easing: [0.65, 0, 0.35, 1] }
       ).finished;
-    } catch(e) { /* motion not available, proceed */ }
+    } catch(e) {}
     readerContent.classList.remove('flipping');
   }
 
@@ -134,20 +135,19 @@ async function readChapter(idx, direction) {
     return;
   }
 
-  // 3D 翻页：翻入（纸张投影）—— 从翻出状态回到正常
+  // 3D 翻页：翻入 —— 从翻出状态回到正常（0.15s）
   if (window._motionAnimate) {
-    readerContent.style.transform = `rotateY(${-direction * 90}deg)`;
-    readerContent.style.opacity = '0.3';
+    readerContent.style.transform = `rotateY(${-direction * 45}deg)`;
+    readerContent.style.opacity = '0.6';
     readerContent.classList.add('flip-in');
     try {
       await window._motionAnimate(
         readerContent,
-        { transform: [`rotateY(${-direction * 90}deg)`, 'rotateY(0deg)'], opacity: [0.3, 1] },
-        { duration: 0.3, easing: [0.16, 1, 0.3, 1] }
+        { transform: [`rotateY(${-direction * 45}deg)`, 'rotateY(0deg)'], opacity: [0.6, 1] },
+        { duration: 0.15, easing: [0.16, 1, 0.3, 1] }
       ).finished;
     } catch(e) {}
     readerContent.classList.remove('flip-in');
-    // 确保动画结束后内容完全可见（某些 Motion 版本不会自动清除 inline style）
     readerContent.style.transform = '';
     readerContent.style.opacity = '';
   }

@@ -285,7 +285,7 @@ class SourceManager:
         print(f'  分类: {type_stats}')
 
     def search(self, kw, page=1, source_filter=None, source_type=None,
-               max_workers=40, search_timeout=5):
+               max_workers=50, search_timeout=4):
         # 重置变量存储（避免跨搜索泄漏）
         from rules.variables import reset_vars
         reset_vars()
@@ -348,12 +348,12 @@ class SourceManager:
         pool = ThreadPoolExecutor(max_workers=max_workers)
         try:
             futs = [pool.submit(_do, s) for s in tiered]
-            deadline = time.time() + search_timeout + 6
-            min_search = time.time() + 1.5
-            early_deadline = time.time() + 3
+            deadline = time.time() + search_timeout + 2     # 硬截止
+            min_search = time.time() + 0.8                  # 0.8s 后 ≥30 条就返回
+            early_deadline = time.time() + 2                # 2s 后 ≥10 条就返回
 
             try:
-                for fut in as_completed(futs, timeout=search_timeout + 10):
+                for fut in as_completed(futs, timeout=search_timeout + 6):
                     try:
                         results = fut.result()
                         for r in results:
