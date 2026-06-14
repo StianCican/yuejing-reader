@@ -118,7 +118,7 @@ async function readChapter(idx, direction) {
     return;
   }
 
-  // 3D 翻页：翻入（纸张投影）
+  // 3D 翻页：翻入（纸张投影）—— 从翻出状态回到正常
   if (window._motionAnimate) {
     readerContent.style.transform = `rotateY(${-direction * 90}deg)`;
     readerContent.style.opacity = '0.3';
@@ -126,11 +126,14 @@ async function readChapter(idx, direction) {
     try {
       await window._motionAnimate(
         readerContent,
-        { transform: ['rotateY(0deg)', `rotateY(${-direction * 90}deg)`], opacity: [1, 0.3] },
+        { transform: [`rotateY(${-direction * 90}deg)`, 'rotateY(0deg)'], opacity: [0.3, 1] },
         { duration: 0.3, easing: [0.16, 1, 0.3, 1] }
       ).finished;
     } catch(e) {}
     readerContent.classList.remove('flip-in');
+    // 确保动画结束后内容完全可见（某些 Motion 版本不会自动清除 inline style）
+    readerContent.style.transform = '';
+    readerContent.style.opacity = '';
   }
 
   // 章节读完标记
