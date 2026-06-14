@@ -143,13 +143,23 @@ function registerAlpineComponents() {
 
     init() {
       window._alpine = this;
-      loadShelf();
+      // app.js 自身定义的函数，可直接调用
       loadSources();
       loadProgress();
-      applyReadingSettings();
       setupTopbarScroll();
       setupRippleEffect();
       setupBookCardTilt();
+      // 跨文件函数（shelf.js / settings.js 在 app.js 之后加载），
+      // 等 DOMContentLoaded 时所有 defer 脚本已就绪再调
+      if (document.readyState === 'loading') {
+        window.addEventListener('DOMContentLoaded', () => {
+          if (typeof loadShelf === 'function') loadShelf();
+          if (typeof applyReadingSettings === 'function') applyReadingSettings();
+        });
+      } else {
+        if (typeof loadShelf === 'function') loadShelf();
+        if (typeof applyReadingSettings === 'function') applyReadingSettings();
+      }
 
       // $watch: 搜索/书架数据变化后触发 Motion One stagger
       this.$watch('searchResults', () => {
