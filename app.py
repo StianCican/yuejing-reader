@@ -278,20 +278,26 @@ def api_proxy():
     except Exception:
         pass
     referer = request.args.get('referer', '') or request.args.get('source', '') or url
-    headers = {
-        'Referer': referer,
-        'User-Agent': session.headers.get('User-Agent', ''),
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-    }
-    try:
-        resp = session.get(url, headers=headers, timeout=10, stream=True, verify=False)
-        content_type = resp.headers.get('Content-Type', 'image/jpeg')
-        data = resp.content[:5 * 1024 * 1024]
-        return Response(data, content_type=content_type,
-                        headers={'Cache-Control': 'public, max-age=3600',
-                                 'Access-Control-Allow-Origin': '*'})
-    except Exception as e:
-        return f'Fetch failed: {e}', 502
+    # 全面克隆 session 头部（含 Accept-Encoding/Cookie 等 CDN 可能需要的字段）
+    headers = dict(session.headers)
+    headers['Referer'] = referer
+    headers['Accept'] = 'image/webp,image/apng,image/*,*/*;q=0.8'
+
+    import time as _time
+    last_err = ''
+    for attempt in range(2):
+        try:
+            resp = session.get(url, headers=headers, timeout=15, stream=True, verify=False)
+            content_type = resp.headers.get('Content-Type', 'image/jpeg')
+            data = resp.content[:5 * 1024 * 1024]
+            return Response(data, content_type=content_type,
+                            headers={'Cache-Control': 'public, max-age=3600',
+                                     'Access-Control-Allow-Origin': '*'})
+        except Exception as e:
+            last_err = str(e)
+            if attempt == 0:
+                _time.sleep(0.5)  # 短暂等待后重试一次
+    return f'Fetch failed: {last_err}', 502
 
 
 @app.route('/api/shelf')

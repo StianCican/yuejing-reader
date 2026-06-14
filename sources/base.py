@@ -107,14 +107,17 @@ class BaseSource:
             }
         if self._is_css_detail():
             result = self._detail_css(book_url, search_data)
-            if result.get('chapters') or result.get('name'):
-                if not result.get('chapters'):
-                    result['_detail_diag'] = getattr(self, '_last_detail_diag', None)
+            # 有章节直接返回；无章节时继续尝试 JSON 路径回退
+            if result.get('chapters'):
                 return result
+            # CSS 未提取到章节 —— 尝试 JSON 方式（有些源 JSON 和 CSS 混合）
             result2 = self._detail_json(book_url, search_data)
-            if not result2.get('chapters'):
-                result2['_detail_diag'] = getattr(self, '_last_detail_diag', None)
-            return result2
+            if result2.get('chapters'):
+                return result2
+            # 两种方式都没有章节，返回 CSS 结果（至少保留了 name 等信息）+ 诊断
+            if not result.get('chapters'):
+                result['_detail_diag'] = getattr(self, '_last_detail_diag', None)
+            return result
 
         result = self._detail_json(book_url, search_data)
         if not result.get('chapters') or self._is_css_detail():
@@ -220,6 +223,23 @@ class BaseSource:
             return self._chapters_css(toc_url, soup)
         return self._chapters_json(toc_url)
 
+def _chapters_css_extract(soup, rule, diag):
+    """从 BeautifulSoup 中用 Legado CSS 选择器提取章节列表，返回 list[dict] 或 None"""
+    from rules.css_conv import css_conv
+    for p in (rule.split('||') if '||' in rule else [rule]):
+        p = p.strip()
+        if not p:
+            continue
+        css = css_conv(p)
+        try:
+            items = soup.select(css)
+            if items:
+                diag['rule_match'] = True
+                return [{'tag': item} for item in items]
+        except Exception:
+            continue
+    return None
+
     def _chapters_json(self, toc_url):
         """纯 JSON API 目录解析"""
         url = _join_url(self.http_base, toc_url) if toc_url else ''
@@ -284,6 +304,23 @@ class BaseSource:
             self._last_detail_diag = diag
             return []
 
+        # 数据是 BeautifulSoup 但规则看起来像 CSS 选择器时，走 CSS 提取而非 JSON 路径
+        if hasattr(data, 'select_one') and any(kw in cl for kw in ('@', 'class.', 'id.', 'tag.')):
+            chs = _chapters_css_extract(data, cl, diag)
+            if chs is not None:
+                diag['rule_match'] = len(chs) > 0
+                if not chs:
+                    self._last_detail_diag = diag
+                    return []
+                result = []
+                for i, ch in enumerate(chs):
+                    name = extract_val(ch, cn, base_url=self.http_base) or f'第{i+1}章'
+                    curl = _resolve_rule(cu, ch, url)
+                    curl = _join_url(self.http_base, curl) if curl else ''
+                    result.append({'name': name, 'url': curl, 'index': i})
+                result.sort(key=lambda x: x.get('index', 0))
+                return result
+        # 标准 JSON 路径
         if '||' in cl:
             chs = None
             for p in cl.split('||'):
