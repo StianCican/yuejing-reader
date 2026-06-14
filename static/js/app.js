@@ -55,7 +55,7 @@ document.addEventListener('alpine:init', () => {
       return icon('ph:book-open-text') + ' 已读 ' + (ch+1) + ' 章';
     },
     shelfCoverHTML(b) {
-      if (b.cover) return '<img src="' + esc(proxyUrl(b.cover, b.source_url)) + '" onerror="this.parentElement.innerHTML='📕'">';
+      if (b.cover) return '<img src="' + esc(proxyUrl(b.cover, b.source_url)) + '" onerror="this.parentElement.innerHTML=&quot;📕&quot;">';
       return icon('ph:book');
     },
 
@@ -434,9 +434,7 @@ function renderDetail() {
     ${State.chapters.length ? '<button class="btn btn-primary" data-detail-action="read" data-idx="'+(hasProgress ? savedIdx : 0)+'">' + (hasProgress ? icon('ph:book-open-text') + ' 继续阅读（第'+(savedIdx+1)+'章）' : icon('ph:book-open-text') + ' 开始阅读') + '</button>' : ''}
     <button class="btn btn-outline" data-detail-action="shelf">${inShelf ? icon('ph:heart-break') + ' 取消收藏' : icon('ph:heart') + ' 加入书架'}</button>`;
   document.getElementById('chapterCount').innerHTML = `${icon('ph:bookmarks')} 章节目录（${State.chapters.length} 章）`;
-  // 诊断 HTML → 响应式状态，Alpine x-for 自动渲染
-  State._chapterDiagHTML = diagHtml;
-  State.chapters = [...State.chapters];
+  // 漫画源 0 章诊断 HTML —— 先计算，再写入响应式状态（TDZ 安全）
   let diagHtml = '';
   if (b.source_type === 2 && !State.chapters.length && b.diagnostics) {
     const d = b.diagnostics;
@@ -463,6 +461,9 @@ function renderDetail() {
     diagHtml += '<div class="detail-diag-meta">源：' + esc(d.source_name || '') + ' | 分组：' + esc(d.source_group || '') + '</div>';
     diagHtml += '</div>';
   }
+  // 写入响应式状态 → Alpine x-for / x-html 自动渲染
+  State._chapterDiagHTML = diagHtml;
+  State.chapters = [...State.chapters];
   // 章节列表由 Alpine x-for 渲染（#chapterList 模板）
   // _chapterDiagHTML 存储诊断 HTML，chapters 数组驱动 x-for
   // isChapterCurrent / isChapterRead 控制 CSS class
@@ -493,8 +494,12 @@ function renderSources() {
   if (partialCount > 0) statusHtml += ' · <span style="color:var(--amber)">' + partialCount + ' 部分</span>';
   if (deadCount > 0) statusHtml += ' · <span style="color:var(--red)">' + deadCount + ' 失效</span>';
   if (untested > 0) statusHtml += ' · <span style="color:var(--muted)">' + untested + ' 未测</span>';
-  const el = document.getElementById('sourceCount');
-  if (el) el.innerHTML = statusHtml;
+  // 源管理面板的详细统计（id 重命名后专属）
+  const panelEl = document.getElementById('sourcesPanelStats');
+  if (panelEl) panelEl.innerHTML = statusHtml;
+  // 侧边栏头部的简短计数（独立于详细统计）
+  const headEl = document.getElementById('sourceCount');
+  if (headEl) headEl.innerHTML = enabled + '/' + total + ' 源';
   // 触发 Alpine 重新计算 groupedSources
   State.sources = [...State.sources];
 }
