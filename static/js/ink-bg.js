@@ -1,6 +1,8 @@
 /* ════════════════════════════════════════════════════════════════
    ink-bg.js — Canvas 水墨粒子背景
    模拟墨滴在宣纸上晕染扩散的效果
+
+   v2: IntersectionObserver 暂停 · MutationObserver 主题重绘 · 30fps
    ════════════════════════════════════════════════════════════════ */
 
 class InkBackground {
@@ -14,6 +16,9 @@ class InkBackground {
     this.rafId = null;
     this.maxParticles = window.innerWidth <= 768 ? 4 : 8;
     this.spawnInterval = null;
+    this.visible = true;          // IntersectionObserver 控制
+    this.lastFrameTime = 0;
+    this.fpsInterval = 1000 / 30; // 30fps 上限，节省 GPU
 
     this.init();
   }
@@ -25,6 +30,8 @@ class InkBackground {
     this.container.insertBefore(this.canvas, this.container.firstChild);
     this.ctx = this.canvas.getContext('2d');
     this.resize();
+    this.setupVisibilityObserver();
+    this.setupThemeObserver();
     this.start();
 
     window.addEventListener('resize', () => this.resize());
@@ -43,10 +50,35 @@ class InkBackground {
   }
 
   getMutedColor() {
-    // Read CSS variable --muted for current theme
     const style = getComputedStyle(document.documentElement);
     const muted = style.getPropertyValue('--muted').trim();
     return muted || '#8a7d6b';
+  }
+
+  // ── IntersectionObserver：hero 不可见时暂停 ──
+  setupVisibilityObserver() {
+    if (!('IntersectionObserver' in window)) return;
+    this._visibilityObserver = new IntersectionObserver((entries) => {
+      this.visible = entries[0].isIntersecting;
+    }, { threshold: 0 });
+    this._visibilityObserver.observe(this.container);
+  }
+
+  // ── MutationObserver：主题切换时更新粒子颜色 ──
+  setupThemeObserver() {
+    this._themeObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.attributeName === 'data-theme' || m.attributeName === 'class') {
+          // 更新所有现有粒子的颜色为新主题色
+          const newColor = this.getMutedColor();
+          for (const p of this.particles) {
+            p.color = newColor;
+          }
+          break;
+        }
+      }
+    });
+    this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
   }
 
   spawnParticle() {
@@ -77,7 +109,6 @@ class InkBackground {
         continue;
       }
 
-      // 水墨晕染渐变
       const gradient = this.ctx.createRadialGradient(p.x, p.y, p.radius * 0.2, p.x, p.y, p.radius);
       gradient.addColorStop(0, this.hexToRgba(p.color, p.alpha));
       gradient.addColorStop(0.5, this.hexToRgba(p.color, p.alpha * 0.4));
@@ -99,20 +130,28 @@ class InkBackground {
     return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
   }
 
-  animate() {
-    this.update();
-    this.rafId = requestAnimationFrame(() => this.animate());
+  animate(timestamp) {
+    // 不可见时跳过绘制，但仍保持 rAF 以便恢复（低频轮询）
+    if (this.visible && timestamp - this.lastFrameTime >= this.fpsInterval) {
+      this.lastFrameTime = timestamp;
+      this.update();
+    }
+    this.rafId = requestAnimationFrame((t) => this.animate(t));
   }
 
   start() {
-    this.rafId = requestAnimationFrame(() => this.animate());
+    // 跳帧驱动：传入 timestamp 进行节流
+    this.lastFrameTime = performance.now();
+    this.rafId = requestAnimationFrame((t) => this.animate(t));
     this.spawnParticle();
-    this.spawnInterval = setInterval(() => this.spawnParticle(), 3500);
+    this.spawnInterval = setInterval(() => { if (this.visible) this.spawnParticle(); }, 3500);
   }
 
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     if (this.spawnInterval) clearInterval(this.spawnInterval);
+    if (this._visibilityObserver) this._visibilityObserver.disconnect();
+    if (this._themeObserver) this._themeObserver.disconnect();
     if (this.canvas && this.canvas.parentNode) {
       this.canvas.parentNode.removeChild(this.canvas);
     }
@@ -120,11 +159,17 @@ class InkBackground {
   }
 }
 
-// Auto-init on hero when DOM ready
+// ── Auto-init ──
+let _inkInstance = null;
+
 function initInkBg() {
   const hero = document.querySelector('.hero');
-  if (hero) new InkBackground(hero);
+  if (hero) _inkInstance = new InkBackground(hero);
 }
+
+// 暴露 destroy 给外部
+window._destroyInkBg = () => { if (_inkInstance) { _inkInstance.destroy(); _inkInstance = null; } };
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initInkBg);
 } else {
