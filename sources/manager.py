@@ -7,6 +7,10 @@ import requests as _req
 from .json_api import JsonApiSource
 from .css import CssSource
 from .js import JsSource
+from utils.paths import (
+    source_status_file, flagged_sources_file, book_sources_file,
+    user_data_path, resource_path,
+)
 
 
 class SourceManager:
@@ -16,13 +20,33 @@ class SourceManager:
         self.health = {}
         self._flagged = {}
         self._health_running = False
-        self._status_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'source_status.json')
-        self._flagged_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'flagged_sources.json')
+        # 用户可写数据 —— 不再写在项目根
+        self._status_file = str(source_status_file())
+        self._flagged_file = str(flagged_sources_file())
+        # 旧版数据自动迁移：项目根的两份 JSON 第一次启动搬到用户目录
+        self._migrate_legacy_data()
         self._fail_count = {}
         self.type_index = {0: [], 1: [], 2: [], 3: [], 4: []}
         self._load()
         self._restore_health()
         self._restore_flagged()
+
+    def _migrate_legacy_data(self):
+        """把项目根历史遗留的 source_status.json / flagged_sources.json 挪到用户目录"""
+        from pathlib import Path
+        proj_root = Path(__file__).resolve().parent.parent
+        for legacy_name, target_path in (
+            ('source_status.json', self._status_file),
+            ('flagged_sources.json', self._flagged_file),
+        ):
+            legacy = proj_root / legacy_name
+            target = Path(target_path)
+            if legacy.exists() and not target.exists():
+                try:
+                    target.write_text(legacy.read_text(encoding='utf-8'), encoding='utf-8')
+                    print(f'📦 已迁移旧版数据 {legacy_name} → {target}')
+                except Exception as e:
+                    print(f'⚠ 迁移 {legacy_name} 失败: {e}')
 
     def _restore_health(self):
         try:
@@ -199,10 +223,22 @@ class SourceManager:
         return {'status': 'started', 'domains': len(domains)}
 
     def _load(self):
-        src_path = sys.argv[1] if len(sys.argv) > 1 else r'F:\86135\下载\墨辰整理书源大全7.1（禁止倒卖）【最新完整】.json'
+        # 解析书源 JSON 路径，优先级：
+        #   1. 命令行参数 sys.argv[1]
+        #   2. 用户数据目录 book_sources.json（首次启动会从内置 default_sources.json 拷贝）
+        #   3. 历史硬编码路径（开发兜底，分发版不会用到）
+        if len(sys.argv) > 1:
+            src_path = sys.argv[1]
+        else:
+            user_book_sources = book_sources_file()
+            if user_book_sources.exists():
+                src_path = str(user_book_sources)
+            else:
+                src_path = r'F:\86135\下载\墨辰整理书源大全7.1（禁止倒卖）【最新完整】.json'
         try:
             with open(src_path, encoding='utf-8') as f:
                 data = json.load(f)
+            print(f'📚 书源文件: {src_path}')
         except Exception as e:
             print(f'⚠ 书源加载失败: {e}')
             data = []

@@ -10,3 +10,9 @@ node_modules/
 test_results.json
 source_status.json
 flagged_sources.json
+runtime/bin/
+build/
+dist/
+*.spec
+scripts/
+test_*.py

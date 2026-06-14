@@ -16,10 +16,19 @@ if sys.platform == 'win32':
 from flask import Flask, request, jsonify, render_template, Response
 from sources import SourceManager
 from utils.http import _parse_inline_header, session
+from utils.paths import shelf_file, user_data_path
 
 mgr = SourceManager()
 
-SHELF_FILE = Path(__file__).parent / 'shelf.json'
+# ── 旧版数据迁移：把项目根的 shelf.json 一次性挪到用户数据目录 ──
+_legacy_shelf = Path(__file__).parent / 'shelf.json'
+SHELF_FILE = shelf_file()
+if _legacy_shelf.exists() and not SHELF_FILE.exists():
+    try:
+        SHELF_FILE.write_text(_legacy_shelf.read_text(encoding='utf-8'), encoding='utf-8')
+        print(f'📦 已迁移旧版书架数据 → {SHELF_FILE}')
+    except Exception as e:
+        print(f'⚠ 书架数据迁移失败: {e}')
 
 
 def load_shelf():
@@ -267,8 +276,39 @@ def api_shelf_add():
 
 
 if __name__ == '__main__':
+    import threading, webbrowser, socket as _sk
+
+    def _pick_port(preferred=5000, max_tries=20):
+        """寻找可用端口：先试 preferred，被占就 +1 往后找"""
+        for off in range(max_tries):
+            port = preferred + off
+            with _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM) as s:
+                try:
+                    s.bind(('127.0.0.1', port))
+                    return port
+                except OSError:
+                    continue
+        return preferred  # 实在不行还回原值，让 Flask 自己报错
+
+    port = _pick_port(5000)
+    url = f'http://localhost:{port}'
+
+    # 是否在 PyInstaller 打包后的环境里运行
+    _frozen = getattr(sys, 'frozen', False)
+
     print('╔══════════════════════════════════════╗')
-    print('║   本地小说聚合阅读器                  ║')
-    print('║   http://localhost:5000               ║')
+    print('║   阅境 · 本地小说聚合阅读器           ║')
+    print(f'║   {url:<35}║')
     print('╚══════════════════════════════════════╝')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+    # 打包版自动打开浏览器；开发模式按需手动打开
+    if _frozen:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+
+    # 打包版禁用 debug + reloader（reloader 会启第二个进程，与 Node worker 冲突）
+    app.run(
+        host='127.0.0.1' if _frozen else '0.0.0.0',
+        port=port,
+        debug=not _frozen,
+        use_reloader=not _frozen,
+    )
