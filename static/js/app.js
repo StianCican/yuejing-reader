@@ -59,6 +59,47 @@ document.addEventListener('alpine:init', () => {
       return icon('ph:book');
     },
 
+    // 源列表辅助（供 x-for 使用）
+    sourceFilterQuery: '',
+    sourceFlaggedOnly: false,
+    get sourceDeadCount() {
+      return (window.State?.sources || []).filter(s => s.status === 'dead').length;
+    },
+    get groupedSources() {
+      const sources = window.State?.sources || [];
+      const q = (this.sourceFilterQuery || '').toLowerCase();
+      const flaggedOnly = this.sourceFlaggedOnly;
+      let filtered = sources;
+      if (flaggedOnly) filtered = filtered.filter(s => s.flagged);
+      if (q) filtered = filtered.filter(s => (s.name || '').toLowerCase().includes(q));
+      const groups = {};
+      filtered.forEach(s => {
+        const g = s.group || '其他';
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(s);
+      });
+      return Object.entries(groups).map(([name, items]) => ({ name, items }));
+    },
+    sourceDotClass(s) {
+      if (s.status === 'ok') return 'on';
+      if (s.status === 'partial') return 'partial';
+      if (s.status === 'dead') return 'off';
+      return 'unknown';
+    },
+    sourceStatusTitle(s) {
+      if (s.status === 'ok') return '可用：搜索有结果';
+      if (s.status === 'partial') return '部分：域名通但搜索状态不明';
+      if (s.status === 'dead') return '失效：域名不可达';
+      return '未检测';
+    },
+    sourceFlagIcon(s) { return s.flagged ? icon('ph:circle-fill') : icon('ph:circle'); },
+    sourceFlagTitle(s) { return s.flagged ? (s.flag_notes ? '已标记: ' + esc(s.flag_notes) : '已标记（点击取消）') : '点击标记此源'; },
+    toggleSource(url) { if (typeof window.toggleSource === 'function') window.toggleSource(url); },
+    flagSource(url) { if (typeof window.flagSource === 'function') window.flagSource(url); },
+    runHealthCheck() { if (typeof window.runHealthCheck === 'function') window.runHealthCheck(); },
+    batchDisableDead() { if (typeof window.batchDisableDead === 'function') window.batchDisableDead(); },
+    toggleFlaggedFilter() { this.sourceFlaggedOnly = !this.sourceFlaggedOnly; },
+
     init() {
       window._alpine = this;
       loadShelf();
@@ -439,54 +480,22 @@ async function loadSources() {
 }
 
 function renderSources() {
+  // 统计栏更新 — 源列表由 Alpine x-for + groupedSources 自动渲染
   const total = State.sources.length;
   const enabled = State.sources.filter(s => s.enabled).length;
   const okCount = State.sources.filter(s => s.status === 'ok').length;
   const partialCount = State.sources.filter(s => s.status === 'partial').length;
   const deadCount = State.sources.filter(s => s.status === 'dead').length;
   const untested = State.sources.filter(s => !s.status).length;
-  let statusHtml = `${enabled}/${total} 源已启用`;
-  if (okCount > 0) statusHtml += ` · <span style="color:var(--green)">${okCount} 可用</span>`;
-  if (partialCount > 0) statusHtml += ` · <span style="color:var(--amber)">${partialCount} 部分</span>`;
-  if (deadCount > 0) statusHtml += ` · <span style="color:var(--red)">${deadCount} 失效</span>`;
-  if (untested > 0) statusHtml += ` · <span style="color:var(--muted)">${untested} 未测</span>`;
-  document.getElementById('sourceCount').innerHTML = statusHtml;
-  const el = document.getElementById('sourcesPanel');
-  const groups = {};
-  State.sources.forEach(s => {
-    const g = s.group || '其他';
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(s);
-  });
-  let html = `
-    <div style="display:flex;gap:8px;margin-bottom:12px">
-      <input type="text" id="sourceFilterInput" placeholder="筛选源..."
-        style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"
-        oninput="filterSources()">
-      <button id="filterFlaggedBtn" class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="filterFlagged()" title="只显示已标记源">${icon('ph:flag')}</button>
-      <button class="btn btn-outline" style="white-space:nowrap;font-size:12px" onclick="runHealthCheck()" title="检测源可用性">${icon('ph:magnifying-glass')} 检测</button>
-    </div>`;
-  if (deadCount > 0) {
-    html += `<button class="btn btn-outline" style="width:100%;margin-bottom:12px;color:var(--red);border-color:var(--red);font-size:12px" onclick="batchDisableDead()">${icon('ph:warning')} 一键禁用 ${deadCount} 个失效源</button>`;
-  }
-  for (const [g, list] of Object.entries(groups)) {
-    html += `<h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)">${esc(g)}（${list.length}）</h3>`;
-    html += list.map(s => {
-      let dot = 'unknown'; let title = '未检测';
-      if (s.status === 'ok')      { dot = 'on';  title = '可用：搜索有结果'; }
-      else if (s.status === 'partial') { dot = 'partial'; title = '部分：域名通但搜索状态不明'; }
-      else if (s.status === 'dead')  { dot = 'off'; title = '失效：域名不可达'; }
-      const flagIcon = s.flagged ? icon('ph:circle-fill') : icon('ph:circle');
-      const flagTitle = s.flagged ? (s.flag_notes ? `已标记: ${esc(s.flag_notes)}` : '已标记（点击取消）') : '点击标记此源';
-      return `<div class="source-item ${s.flagged ? 'flagged' : ''}" title="${title}">
-        <span class="dot ${dot}"></span>
-        <span class="name" onclick="event.stopPropagation();toggleSource('${esc(s.url)}')">${esc(s.name)}</span>
-        <span class="badge">${s.type}</span>
-        <span class="flag-btn" onclick="event.stopPropagation();flagSource('${esc(s.url)}')" title="${flagTitle}">${flagIcon}</span>
-      </div>`;
-    }).join('');
-  }
-  el.innerHTML = html;
+  let statusHtml = enabled + '/' + total + ' 源已启用';
+  if (okCount > 0) statusHtml += ' · <span style="color:var(--green)">' + okCount + ' 可用</span>';
+  if (partialCount > 0) statusHtml += ' · <span style="color:var(--amber)">' + partialCount + ' 部分</span>';
+  if (deadCount > 0) statusHtml += ' · <span style="color:var(--red)">' + deadCount + ' 失效</span>';
+  if (untested > 0) statusHtml += ' · <span style="color:var(--muted)">' + untested + ' 未测</span>';
+  const el = document.getElementById('sourceCount');
+  if (el) el.innerHTML = statusHtml;
+  // 触发 Alpine 重新计算 groupedSources
+  State.sources = [...State.sources];
 }
 
 let healthCheckRunning = false;

@@ -49,7 +49,42 @@
           </div>
         </template>
       </div>
-      <div id="sourcesPanel" class="sidebar-section" x-show="sidebarTab === 'sources'"></div>
+      <div id="sourcesPanel" class="sidebar-section" x-show="sidebarTab === 'sources'">
+        <!-- 统计 -->
+        <div id="sourceCount" style="margin-bottom:10px;font-size:12px"></div>
+        <!-- 控件 -->
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <input type="text" x-model="sourceFilterQuery" placeholder="筛选源..."
+            style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          <button class="btn btn-outline" style="white-space:nowrap;font-size:12px"
+            :class="{ active: sourceFlaggedOnly }" @click="toggleFlaggedFilter()" title="只显示已标记源">
+            <iconify-icon icon="ph:flag" inline></iconify-icon>
+          </button>
+          <button class="btn btn-outline" style="white-space:nowrap;font-size:12px" @click="runHealthCheck()" title="检测源可用性">
+            <iconify-icon icon="ph:magnifying-glass" inline></iconify-icon> 检测
+          </button>
+        </div>
+        <!-- 一键禁用失效源 -->
+        <button class="btn btn-outline" x-show="sourceDeadCount > 0"
+          style="width:100%;margin-bottom:12px;color:var(--red);border-color:var(--red);font-size:12px"
+          @click="batchDisableDead()">
+          <iconify-icon icon="ph:warning" inline></iconify-icon> 一键禁用 <span x-text="sourceDeadCount"></span> 个失效源
+        </button>
+        <!-- 源列表（分组 x-for） -->
+        <template x-for="group in groupedSources" :key="group.name">
+          <div>
+            <h3 style="margin:12px 0 8px;font-size:13px;color:var(--muted)" x-text="group.name + '（' + group.items.length + '）'"></h3>
+            <template x-for="s in group.items" :key="s.url">
+              <div class="source-item" :class="{ flagged: s.flagged }" :title="sourceStatusTitle(s)">
+                <span class="dot" :class="sourceDotClass(s)"></span>
+                <span class="name" @click.stop="toggleSource(s.url)" x-text="s.name"></span>
+                <span class="badge" x-text="s.type"></span>
+                <span class="flag-btn" @click.stop="flagSource(s.url)" :title="sourceFlagTitle(s)" x-html="sourceFlagIcon(s)"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
     </div>
   </aside>
 
