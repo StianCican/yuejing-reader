@@ -324,7 +324,9 @@ class LegadoRuntime:
         if self._needs_full_mode(js_code):
             result = self.execute_full(js_code, source_url=source_url, result_value=result_value)
             if 'error' in result:
-                logger.debug(f"Legado JS full mode error: {result['error']}")
+                logger.warning(f"Legado JS full mode error: {result['error']} | source={source_url} | code={js_code[:100]}")
+                # JS 执行失败但仍然返回 result_value —— 调用者如 _resolve_rule
+                # 会得到原始值，可以触发备选规则或回退逻辑
                 return str(result_value)
             val = result.get('result', result_value)
             return str(val) if val is not None else str(result_value)

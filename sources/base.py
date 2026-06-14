@@ -401,8 +401,16 @@ class BaseSource:
 
         result = []
         for i, item in enumerate(items):
-            name = extract_val(item, cn_sel) or f'第{i+1}章'
-            curl = extract_link(item, cu_sel, self.http_base) if cu_sel else ''
+            # 启发式回退的 item 是 {'tag': <a>}，直接取文本和链接
+            if isinstance(item, dict) and 'tag' in item and hasattr(item['tag'], 'get_text'):
+                tag = item['tag']
+                name = tag.get_text(strip=True) or f'第{i+1}章'
+                curl = tag.get('href', '')
+                if curl and self.http_base:
+                    curl = _join_url(self.http_base, curl)
+            else:
+                name = extract_val(item, cn_sel) or f'第{i+1}章'
+                curl = extract_link(item, cu_sel, self.http_base) if cu_sel else ''
             result.append({'name': name, 'url': curl, 'index': i})
         result.sort(key=lambda x: x.get('index', 0))
         return result
@@ -530,10 +538,17 @@ def _extract_single_page(source, url, content_rules):
         text = ''
         if content_rule:
             val = _resolve_rule(content_rule, data, base_url)
-            if val:
+            if val and not str(val).startswith('$.'):
                 text = clean_text(val)
-        else:
+        if not text and not content_rule:
             text = clean_text(str(data))
+        # 回退：规则未匹配到内容 → 尝试从 BeautifulSoup 取全文
+        if not text and hasattr(data, 'get_text'):
+            try:
+                body = data.find('body') or data.find('article') or data
+                text = clean_text(body.get_text(separator='\n', strip=True))
+            except Exception:
+                pass
 
         # 提取下一页URL
         next_url = None
