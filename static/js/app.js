@@ -113,13 +113,25 @@ function registerAlpineComponents() {
       let filtered = sources;
       if (flaggedOnly) filtered = filtered.filter(s => s.flagged);
       if (q) filtered = filtered.filter(s => (s.name || '').toLowerCase().includes(q));
+      // 按类型分组，组内按健康状态排序（ok > partial > 未测 > dead）
+      const typeLabels = {0: '📖 小说', 1: '🎧 听书', 2: '🎨 漫画', 3: '📁 文件', 4: '🎬 影视'};
+      const statusOrder = {ok: 0, partial: 1, undefined: 2, dead: 3};
       const groups = {};
       filtered.forEach(s => {
-        const g = s.group || '其他';
-        if (!groups[g]) groups[g] = [];
-        groups[g].push(s);
+        const typeLabel = typeLabels[s.source_type] || '📦 其他';
+        if (!groups[typeLabel]) groups[typeLabel] = [];
+        groups[typeLabel].push(s);
       });
-      return Object.entries(groups).map(([name, items]) => ({ name, items }));
+      return Object.entries(groups)
+        .sort((a, b) => {
+          const ta = parseInt(Object.keys(typeLabels).find(k => typeLabels[k] === a[0])) || 99;
+          const tb = parseInt(Object.keys(typeLabels).find(k => typeLabels[k] === b[0])) || 99;
+          return ta - tb;
+        })
+        .map(([name, items]) => ({
+          name,
+          items: items.sort((a, b) => (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2))
+        }));
     },
     sourceDotClass(s) {
       if (s.status === 'ok') return 'on';
@@ -150,16 +162,12 @@ function registerAlpineComponents() {
       setupRippleEffect();
       setupBookCardTilt();
       // 跨文件函数（shelf.js / settings.js 在 app.js 之后加载），
-      // 等 DOMContentLoaded 时所有 defer 脚本已就绪再调
-      if (document.readyState === 'loading') {
-        window.addEventListener('DOMContentLoaded', () => {
-          if (typeof loadShelf === 'function') loadShelf();
-          if (typeof applyReadingSettings === 'function') applyReadingSettings();
-        });
-      } else {
+      // defer 脚本执行时 readyState 是 'interactive'（非 'loading'），
+      // 不能直接调——shelf.js/settings.js 此刻尚未执行
+      window.addEventListener('DOMContentLoaded', () => {
         if (typeof loadShelf === 'function') loadShelf();
         if (typeof applyReadingSettings === 'function') applyReadingSettings();
-      }
+      });
 
       // $watch: 搜索/书架数据变化后触发 Motion One stagger
       this.$watch('searchResults', () => {

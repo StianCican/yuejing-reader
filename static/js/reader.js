@@ -3,17 +3,19 @@
    ════════════════════════════════════════════════════════════════ */
 
 // ── 段落式正文渲染 ──
-// 诊断面板 HTML（独立函数，无论内容是否为空都可追加到内容底部）
+// 诊断面板 HTML —— 默认折叠，点击标题行展开/收起
 function diagPanelHTML(diagnostics) {
   if (!diagnostics) return '';
-  let h = '<div class="diagnostics-panel" style="position:relative;margin-top:24px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6;border-left:3px solid var(--amber)">';
-  h += '<button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1" title="关闭">×</button>';
-  h += '<div style="font-weight:600;margin-bottom:4px;color:var(--amber);padding-right:20px"><iconify-icon icon="ph:warning" inline></iconify-icon> 诊断信息</div>';
-  if (diagnostics.reason) h += '<div>' + esc(diagnostics.reason) + '</div>';
+  const uid = 'diag_' + Math.random().toString(36).slice(2, 8);
+  let h = '<div class="diagnostics-panel" style="margin-top:24px;padding:0;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.6;border-left:3px solid var(--amber);overflow:hidden">';
+  h += '<div onclick="var b=document.getElementById(\'' + uid + '\');b.style.display=b.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;padding:8px 12px;font-weight:600;color:var(--amber);user-select:none;display:flex;align-items:center;gap:6px">';
+  h += '<iconify-icon icon="ph:warning" inline></iconify-icon> ' + esc(diagnostics.reason || '诊断信息');
+  h += '<span style="margin-left:auto;font-size:11px;opacity:0.6">点击展开 ▼</span></div>';
+  h += '<div id="' + uid + '" style="display:none;padding:0 12px 10px">';
   if (diagnostics.raw_rule) h += '<div>规则：<code>' + esc(diagnostics.raw_rule) + '</code></div>';
   if (diagnostics.returned_as_content) h += '<div>返回内容预览：<code>' + esc(diagnostics.returned_as_content) + '</code></div>';
   h += '<div style="margin-top:4px">URL：<code style="word-break:break-all;font-size:11px">' + esc(diagnostics.ch_url || '') + '</code></div>';
-  h += '</div>';
+  h += '</div></div>';
   return h;
 }
 
