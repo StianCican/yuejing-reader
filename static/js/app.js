@@ -267,14 +267,17 @@ async function doSearch() {
   const kw = document.getElementById('searchInput').value.trim();
   if (!kw) return;
   showView('search');
-  State.searchResults = null;  // null → Alpine x-if 显示骨架屏
+  State.searchResults = null;  // null → Alpine 显示加载中
+  document.getElementById('resultCount').textContent = '搜索中...';
   try {
     let url = `/api/search?q=${encodeURIComponent(kw)}`;
     if (State.currentSearchType) url += `&type=${State.currentSearchType}`;
     const resp = await fetch(url);
     State.searchResults = await resp.json();
+    document.getElementById('resultCount').textContent = `共 ${State.searchResults.length} 条结果`;
   } catch (e) {
     State.searchResults = [];
+    document.getElementById('resultCount').textContent = '';
     document.getElementById('searchResults').innerHTML = '<div class="empty"><div class="icon"><iconify-icon icon="ph:x-circle" inline></iconify-icon></div><p>搜索失败，请检查后端是否运行</p></div>';
   }
 }
