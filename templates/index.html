@@ -310,13 +310,14 @@
   </template>
 </div>
 
-<!-- Scripts: app defines Alpine state + globals, others extend -->
+<!-- Scripts: 必须 defer —— alpinejs.min.js 是 defer，同步脚本会比它先跑，
+     顶层 Alpine.reactive(...) 会拿不到 Alpine 而 ReferenceError → window.State 永远不存在 -->
 <script src="/static/js/motion-import.js" type="module"></script>
-<script src="/static/js/ink-bg.js"></script>
-<script src="/static/js/app.js"></script>
-<script src="/static/js/reader.js"></script>
-<script src="/static/js/comic_reader.js"></script>
-<script src="/static/js/shelf.js"></script>
-<script src="/static/js/settings.js"></script>
+<script defer src="/static/js/ink-bg.js"></script>
+<script defer src="/static/js/app.js"></script>
+<script defer src="/static/js/reader.js"></script>
+<script defer src="/static/js/comic_reader.js"></script>
+<script defer src="/static/js/shelf.js"></script>
+<script defer src="/static/js/settings.js"></script>
 </body>
 </html>
