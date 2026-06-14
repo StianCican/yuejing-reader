@@ -195,6 +195,8 @@ const State = Alpine.reactive({
   searchResults: [],
   currentSearchType: '',
 });
+// 暴露到 window：Alpine appState 的 getter 通过 window.State 桥接
+window.State = State;
 
 // ── 图片代理 ──
 function proxyUrl(url, referer) {
