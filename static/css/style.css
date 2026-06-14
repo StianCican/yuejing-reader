@@ -753,18 +753,36 @@ main.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
   pointer-events:none;z-index:0;border-radius:var(--radius);
 }
 .reader-content>*{position:relative;z-index:1}
-/* 翻页纸张投影 */
+/* ── 翻页纸张投影 + 卷边质感 ── */
 .reader-content.flipping{
   box-shadow:
-    0 20px 60px rgba(0,0,0,0.15),
-    0 4px 16px rgba(0,0,0,0.08),
-    -8px 0 24px rgba(0,0,0,0.06);
+    0 24px 72px rgba(0,0,0,0.18),
+    0 6px 20px rgba(0,0,0,0.10),
+    -12px 0 36px rgba(0,0,0,0.08),
+    2px 0 8px rgba(0,0,0,0.04);
+  /* 卷边渐变：左侧（翻起侧）微暗 → 右侧正常 */
+  background-image:
+    linear-gradient(90deg, rgba(0,0,0,0.05) 0%, transparent 20%, transparent 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+/* 翻页中纸纹更显 */
+.reader-content.flipping::before{
+  opacity:.06
 }
 .reader-content.flip-in{
   box-shadow:
-    0 20px 60px rgba(0,0,0,0.15),
-    0 4px 16px rgba(0,0,0,0.08),
-    8px 0 24px rgba(0,0,0,0.06);
+    0 24px 72px rgba(0,0,0,0.18),
+    0 6px 20px rgba(0,0,0,0.10),
+    12px 0 36px rgba(0,0,0,0.08),
+    -2px 0 8px rgba(0,0,0,0.04);
+  /* 卷边渐变：右侧（翻入侧）微暗 → 左侧正常 */
+  background-image:
+    linear-gradient(270deg, rgba(0,0,0,0.05) 0%, transparent 20%, transparent 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+/* 翻入时纸纹恢复（略强于常态） */
+.reader-content.flip-in::before{
+  opacity:.05
 }
 .reader-content p{
   text-indent:var(--reader-indent);margin-bottom:var(--reader-para-spacing);line-height:2
